@@ -37,8 +37,12 @@ class JeopartyBot < SlackRubyBot::Bot
         )
 
         EM.defer do
-          sleep 10
-          if $redis.exists(current_key)
+          sleep ENV['ANSWER_TIME_SECONDS'].to_i
+          # Unanswered key is used here to avoid a both a race condition with
+          # current_key and an O(N) keys() operation
+          unanswered_key = "unanswered:#{data.channel}:#{clue['id']}"
+          if $redis.exists(unanswered_key)
+            $redis.del(unanswered_key)
             $redis.del(current_key)
             client.say(text: "Time is up! The answer was \n> #{clue['answer']}", channel: data.channel)
           end
@@ -53,13 +57,20 @@ class JeopartyBot < SlackRubyBot::Bot
 
     unless answer.nil?
       answer = JSON.parse(answer)
-      if is_correct?(answer['answer'], data.text)
-        $redis.del(current_key)
-        score = update_score(data.channel, data.user, answer['value'])
-        client.say(text: "That is the correct answer <@#{data.user}>! Your score is now #{score}", channel: data.channel)
+      valid_attempt = $redis.set("attempt:#{data.channel}:#{data.user}:#{answer['id']}", '',
+                                 ex: ENV['ANSWER_TIME_SECONDS'].to_i * 2, nx: true)
+      if valid_attempt
+        if is_correct?(answer['answer'], data.text)
+          $redis.del(current_key)
+          $redis.del("unanswered:#{data.channel}:#{answer['id']}")
+          score = update_score(data.channel, data.user, answer['value'])
+          client.say(text: "That is the correct answer <@#{data.user}>! Your score is now #{score}", channel: data.channel)
+        else
+          score = update_score(data.channel, data.user, answer['value'] * -1)
+          client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{score}", channel: data.channel)
+        end
       else
-        score = update_score(data.channel, data.user, answer['value'] * -1)
-        client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{score}", channel: data.channel)
+        client.say(text: "Only one guess per clue is allowed <@#{data.user}>!", channel: data.channel)
       end
     end
   end
@@ -106,7 +117,7 @@ def is_correct?(correct, response)
   similarity = white.similarity(correct, response)
   puts "[LOG] Correct answer: #{correct} | User answer: #{response} | Similarity: #{similarity}"
 
-  correct == response || similarity >= 0.6
+  correct == response || similarity >= ENV['SIMILARITY_THRESHOLD'].to_f
 end
 
 # Get a clue, remove it from the pool and mark it as active in one 'transaction'
@@ -117,13 +128,15 @@ def get_clue(channel)
   clue_key = $redis.srandmember(game_clue_key)
   unless clue_key.nil?
     clue = $redis.get(clue_key)
+    parsed_clue = JSON.parse(clue)
 
     $redis.pipelined do
       $redis.srem(game_clue_key, clue_key)
-      $redis.setex(current_clue_key, 30, clue)
+      $redis.set(current_clue_key, clue)
+      $redis.setex("unanswered:#{channel}:#{parsed_clue['id']}", ENV['ANSWER_TIME_SECONDS'].to_i + 15, '')
       # TODO: Timeout is nice so the game state isn't totally hosed if something goes wrong
     end
-    JSON.parse(clue)
+    parsed_clue
   end
 end
 
@@ -167,13 +180,12 @@ end
 
 def clean_clue(clue)
   clue['value'] = 200 if clue['value'].nil?
-  answer = clue['answer']
-             .gsub(/[^\w\s]/i, '')
-             .gsub(/^(the|a|an) /i, '')
-             .gsub(/\s+(&nbsp;|&)\s+/i, ' and ')
-             .strip
-             .downcase
-  clue['answer'] = Sanitize.fragment(answer)
+  clue['answer'] = Sanitize.fragment(clue['answer'])
+                     .gsub(/[^\w\s]/i, '')
+                     .gsub(/^(the|a|an) /i, '')
+                     .gsub(/\s+(&nbsp;|&)\s+/i, ' and ')
+                     .strip
+                     .downcase
   clue
 end
 
@@ -247,9 +259,6 @@ def update_score(channel, user, score, add = true)
 end
 
 EM.run do
-  bot1 = SlackRubyBot::Server.new(token: ENV['SLACK_API_TOKEN'], aliases: ['tb'])
-  bot1.start_async
-
   # Load .env vars
   Dotenv.load
   # Disable output buffering
@@ -258,4 +267,7 @@ EM.run do
   # Set up redis
   uri = URI.parse(ENV['REDIS_URL'])
   $redis = Redis.new(host: uri.host, port: uri.port, password: uri.password)
+
+  bot1 = SlackRubyBot::Server.new(token: ENV['SLACK_API_TOKEN'], aliases: ['tb'])
+  bot1.start_async
 end
