@@ -16,11 +16,19 @@ class JeopartyBot < SlackRubyBot::Bot
 
     # Only post a question if none is in progress
     unless $redis.exists(current_key)
-
       clue = get_clue(data.channel)
+
       if clue.nil?
-        client.say(text: 'The game is over! Start a new one with `new game`', channel: data.channel)
+        # Game is over, show the scoreboard
+        players = []
+        get_scoreboard(data.channel).each_with_index do |user, i|
+          name = get_user(user[:user_id])
+          players << "#{i + 1}. #{name['real']}: #{user[:score]}"
+        end
+        client.say(text: "The game is over! The scores for this game were:\n> #{players.join("\n")}",
+                   channel: data.channel)
       else
+        # On to the next clue
         air_date = Time.iso8601(clue['airdate']).to_i
 
         client.web_client.chat_postMessage(
@@ -42,8 +50,7 @@ class JeopartyBot < SlackRubyBot::Bot
           # current_key and an O(N) keys() operation
           unanswered_key = "unanswered:#{data.channel}:#{clue['id']}"
           if $redis.exists(unanswered_key)
-            $redis.del(unanswered_key)
-            $redis.del(current_key)
+            clue_answered(data.channel, clue)
             client.say(text: "Time is up! The answer was \n> #{clue['answer']}", channel: data.channel)
           end
         end
@@ -61,8 +68,7 @@ class JeopartyBot < SlackRubyBot::Bot
                                  ex: ENV['ANSWER_TIME_SECONDS'].to_i * 2, nx: true)
       if valid_attempt
         if is_correct?(answer['answer'], data.text)
-          $redis.del(current_key)
-          $redis.del("unanswered:#{data.channel}:#{answer['id']}")
+          clue_answered(data.channel, answer)
           score = update_score(data.channel, data.user, answer['value'])
           client.say(text: "That is the correct answer <@#{data.user}>! Your score is now #{score}", channel: data.channel)
         else
@@ -75,7 +81,7 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^show\s*(my)?\s*score/ do |client, data, match|
+  match /^show\s*(my)?\s*score\s*$/ do |client, data, match|
     score = get_score(data.channel, data.user)
     client.say(text: "<@#{data.user}>, your score is #{score}", channel: data.channel)
   end
@@ -94,6 +100,27 @@ class JeopartyBot < SlackRubyBot::Bot
     else
       client.say(text: "Not yet! There are still #{clue_count} clues remaining", channel: data.channel)
     end
+  end
+
+  match /^show scoreboard/ do |client, data, match|
+    players = []
+    get_scoreboard(data.channel).each_with_index do |user, i|
+      name = get_user(user[:user_id])
+      players << "#{i + 1}. #{name['real']}: #{user[:score]}"
+    end
+
+    client.say(text: "The scores for this game are:\n> #{players.join("\n")}", channel: data.channel)
+  end
+
+  match /^show leaderboard/ do |client, data, match|
+    players = []
+    get_leaderboard(data.channel).each_with_index do |user, i|
+      puts user
+      name = get_user(user[:user_id])
+      players << "#{i + 1}. #{name['real']}: #{user[:score]}"
+    end
+
+    client.say(text: "The top players across all games are\n> #{players.join("\n")}", channel: data.channel)
   end
 
   command 'build cache' do |client, data, match|
@@ -140,6 +167,13 @@ def get_clue(channel)
   end
 end
 
+def clue_answered(channel, clue)
+  $redis.pipelined do
+    $redis.del("game:#{channel}:current")
+    $redis.del("unanswered:#{channel}:#{clue['id']}")
+  end
+end
+
 def build_game(channel)
   categories = $redis.srandmember('categories', 6)
   category_names = []
@@ -170,7 +204,7 @@ def clean_old_game(channel)
     $redis.del(key)
   end
 
-  user_score_keys = $redis.keys("score:#{channel}:*:game")
+  user_score_keys = $redis.keys("game_score:#{channel}:*")
   user_score_keys.each do |key|
     $redis.del(key)
   end
@@ -209,6 +243,34 @@ def build_category_cache
   end
 end
 
+def get_user(user_id)
+  user = $redis.hgetall("user:#{user_id}")
+  if user.nil? || user.empty?
+    user = get_slack_user_profile(user_id)
+  end
+  user
+end
+
+def get_slack_user_profile(user_id)
+  uri = "https://slack.com/api/users.info?user=#{user_id}&token=#{ENV['SLACK_API_TOKEN']}"
+  request = HTTParty.get(uri)
+  response = JSON.parse(request.body)
+  if response['ok']
+    user = response['user']
+    name = { id: user['id'], name: user['name']}
+    unless user['profile'].nil?
+      name[:real] = user['profile']['real_name'] unless user['profile']['real_name'].nil? || user['profile']['real_name'] == ''
+      name[:first] = user['profile']['first_name'] unless user['profile']['first_name'].nil? || user['profile']['first_name'] == ''
+      name[:last] = user['profile']['last_name'] unless user['profile']['last_name'].nil? || user['profile']['last_name'] == ''
+    end
+    $redis.pipelined do
+      $redis.mapped_hmset("user:#{name[:id]}", name)
+      $redis.expire("user:#{name[:id]}", 60*24*7) # one week
+    end
+    name
+  end
+end
+
 def get_random_question
   uri = 'http://jservice.io/api/random?count=1'
   request = HTTParty.get(uri)
@@ -224,7 +286,7 @@ def get_random_question
 end
 
 def get_score(channel, user)
-  key = "score:#{channel}:#{user}:game"
+  key = "game_score:#{channel}:#{user}"
   current_score = $redis.get(key)
   if current_score.nil?
     0
@@ -244,9 +306,10 @@ def get_alltime_score(channel, user)
 end
 
 def update_score(channel, user, score, add = true)
-  game_key = "score:#{channel}:#{user}:game"
+  game_key = "game_score:#{channel}:#{user}"
   alltime_key = "score:#{channel}:#{user}"
 
+  $redis.sadd("players:#{channel}", user)
   if add
     $redis.incrby(game_key, score)
     $redis.incrby(alltime_key, score)
@@ -256,6 +319,20 @@ def update_score(channel, user, score, add = true)
   end
 
   $redis.get(game_key)
+end
+
+def get_scoreboard(channel)
+  leaders = []
+  $redis.scan_each(:match => "game_score:#{channel}:*"){ |key| user_id = key.gsub("game_score:#{channel}:", ''); leaders << { :user_id => user_id, :score => get_score(channel, user_id) } }
+  puts "[LOG] Scoreboard: #{leaders.to_s}"
+  leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }
+end
+
+def get_leaderboard(channel)
+  leaders = []
+  $redis.scan_each(:match => "score:#{channel}:*"){ |key| user_id = key.gsub("score:#{channel}:", ''); leaders << { :user_id => user_id, :score => get_alltime_score(channel, user_id) } }
+  puts "[LOG] Leaderboard: #{leaders.to_s}"
+  leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.take(10)
 end
 
 EM.run do
