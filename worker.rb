@@ -11,7 +11,7 @@ require 'text'
 SlackRubyBot::Client.logger.level = Logger::WARN
 
 class JeopartyBot < SlackRubyBot::Bot
-  match /^next answer/ do |client, data, match|
+  match /^next\s*($|answer|clue)/ do |client, data, match|
     current_key = "game:#{data.channel}:current"
 
     # Only post a question if none is in progress
@@ -64,12 +64,12 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^show score/ do |client, data, match|
+  match /^show\s*(my)?\s*score/ do |client, data, match|
     score = get_score(data.channel, data.user)
     client.say(text: "<@#{data.user}>, your score is #{score}", channel: data.channel)
   end
 
-  match /^new game/ do |client, data, match|
+  match /^(new|start) game/ do |client, data, match|
     game_key = "game:#{data.channel}:clues"
     clue_count = $redis.scard(game_key)
 
@@ -156,6 +156,11 @@ def clean_old_game(channel)
   clue_keys.each do |key|
     $redis.del(key)
   end
+
+  user_score_keys = $redis.keys("score:#{channel}:*:game")
+  user_score_keys.each do |key|
+    $redis.del(key)
+  end
   $redis.del("game:#{channel}:clues")
   $redis.del("game:#{channel}:current")
 end
@@ -207,6 +212,16 @@ def get_random_question
 end
 
 def get_score(channel, user)
+  key = "score:#{channel}:#{user}:game"
+  current_score = $redis.get(key)
+  if current_score.nil?
+    0
+  else
+    current_score.to_i
+  end
+end
+
+def get_alltime_score(channel, user)
   key = "score:#{channel}:#{user}"
   current_score = $redis.get(key)
   if current_score.nil?
@@ -216,17 +231,19 @@ def get_score(channel, user)
   end
 end
 
-def update_score(channel, user, score = 0)
-  key = "score:#{channel}:#{user}"
-  current_score = $redis.get(key)
-  if current_score.nil?
-    $redis.set(key, score)
-    score
+def update_score(channel, user, score, add = true)
+  game_key = "score:#{channel}:#{user}:game"
+  alltime_key = "score:#{channel}:#{user}"
+
+  if add
+    $redis.incrby(game_key, score)
+    $redis.incrby(alltime_key, score)
   else
-    current_score = current_score.to_i + score
-    $redis.set(key, current_score)
-    current_score
+    $redis.decrby(game_key, score)
+    $redis.decrby(alltime_key, score)
   end
+
+  $redis.get(game_key)
 end
 
 EM.run do
