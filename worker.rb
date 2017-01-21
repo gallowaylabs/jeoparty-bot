@@ -12,41 +12,43 @@ SlackRubyBot::Client.logger.level = Logger::WARN
 
 class JeopartyBot < SlackRubyBot::Bot
   match /^next answer/ do |client, data, match|
-    current_key = "#{data.channel}:current"
+    current_key = "game:#{data.channel}:current"
 
     # Only post a question if none is in progress
     unless $redis.exists(current_key)
 
-      question = get_question
-      air_date = Time.iso8601(question['airdate']).to_i
+      clue = get_clue(data.channel)
+      if clue.nil?
+        client.say(text: 'The game is over! Start a new one with `new game`', channel: data.channel)
+      else
+        air_date = Time.iso8601(clue['airdate']).to_i
 
-      puts client.web_client.chat_postMessage(
-          channel: data.channel,
-          as_user: true,
-          attachments: [
-            {
-              fallback: "#{question['category']['title']} for $#{question['value']}: `#{question['question']}`",
-              title: "#{question['category']['title']} for $#{question['value']}",
-              text: "#{question['question']}",
-              ts: "#{air_date}"
-            }
-          ]
-      )
+        client.web_client.chat_postMessage(
+            channel: data.channel,
+            as_user: true,
+            attachments: [
+              {
+                fallback: "#{clue['category']['title']} for $#{clue['value']}: `#{clue['question']}`",
+                title: "#{clue['category']['title']} for $#{clue['value']}",
+                text: "#{clue['question']}",
+                ts: "#{air_date}"
+              }
+            ]
+        )
 
-      $redis.setex(current_key, 15, question.to_json)
-
-      EM.defer do
-        sleep 10
-        if $redis.exists(current_key)
-          $redis.del(current_key)
-          client.say(text: "Time is up! The answer was \n> #{question['answer']}", channel: data.channel)
+        EM.defer do
+          sleep 10
+          if $redis.exists(current_key)
+            $redis.del(current_key)
+            client.say(text: "Time is up! The answer was \n> #{clue['answer']}", channel: data.channel)
+          end
         end
       end
     end
   end
 
   match /^(what|whats|where|wheres|who|whos) /i do |client, data, match|
-    current_key = "#{data.channel}:current"
+    current_key = "game:#{data.channel}:current"
     answer = $redis.get(current_key)
 
     unless answer.nil?
@@ -68,19 +70,28 @@ class JeopartyBot < SlackRubyBot::Bot
   end
 
   match /^new game/ do |client, data, match|
-    game_key = "#{data.channel}:game"
-    if game_key.nil?
-      client.say(text:'starting a new game goes here', channel: data.channel)
+    game_key = "game:#{data.channel}:clues"
+    clue_count = $redis.scard(game_key)
+
+    # Only start a new game if the previous game is over or
+    # hasn't started yet (e.g. if the categories sound bad)
+    if clue_count.nil? || clue_count == 0 || clue_count == 30
+      category_names = build_game(data.channel)
+
+      client.say(text: "*Starting a new game!* The categories today are:\n #{category_names.join("\n")}",
+                 channel: data.channel)
+    else
+      client.say(text: "Not yet! There are still #{clue_count} clues remaining", channel: data.channel)
     end
+  end
+
+  command 'build cache' do |client, data, match|
+    build_category_cache
+    client.say(text:'done', channel: data.channel)
   end
 end
 
-def is_correct?(correct, response) 
-  correct = correct.gsub(/[^\w\s]/i, '')
-            .gsub(/^(the|a|an) /i, '')
-            .strip
-            .downcase
-
+def is_correct?(correct, response)
   response = response
            .gsub(/\s+(&nbsp;|&)\s+/i, ' and ')
            .gsub(/[^\w\s]/i, '')
@@ -98,7 +109,90 @@ def is_correct?(correct, response)
   correct == response || similarity >= 0.6
 end
 
-def get_question
+# Get a clue, remove it from the pool and mark it as active in one 'transaction'
+def get_clue(channel)
+  game_clue_key = "game:#{channel}:clues"
+  current_clue_key = "game:#{channel}:current"
+
+  clue_key = $redis.srandmember(game_clue_key)
+  unless clue_key.nil?
+    clue = $redis.get(clue_key)
+
+    $redis.pipelined do
+      $redis.srem(game_clue_key, clue_key)
+      $redis.setex(current_clue_key, 30, clue)
+      # TODO: Timeout is nice so the game state isn't totally hosed if something goes wrong
+    end
+    JSON.parse(clue)
+  end
+end
+
+def build_game(channel)
+  categories = $redis.srandmember('categories', 6)
+  category_names = []
+  categories.each do |category|
+    uri = "http://jservice.io/api/clues?category=#{category}"
+    request = HTTParty.get(uri)
+    response = JSON.parse(request.body)
+
+    date_sorted = response.sort_by { |k| k['airdate']}
+
+    # If there are >5 clues, pick a random air date to use and take all clues from that date
+    selected = date_sorted.drop(rand(date_sorted.size / 5) * 5).take(5)
+
+    selected.each do |clue|
+      clue_key = "clue:#{channel}:#{clue['id']}"
+      $redis.set(clue_key, clean_clue(clue).to_json)
+      $redis.sadd("game:#{channel}:clues", clue_key)
+    end
+
+    category_names.append(selected.first['category']['title'])
+  end
+  category_names
+end
+
+def clean_old_game(channel)
+  clue_keys = $redis.keys("clue:#{channel}:*")
+  clue_keys.each do |key|
+    $redis.del(key)
+  end
+  $redis.del("game:#{channel}:clues")
+  $redis.del("game:#{channel}:current")
+end
+
+def clean_clue(clue)
+  clue['value'] = 200 if clue['value'].nil?
+  answer = clue['answer']
+             .gsub(/[^\w\s]/i, '')
+             .gsub(/^(the|a|an) /i, '')
+             .gsub(/\s+(&nbsp;|&)\s+/i, ' and ')
+             .strip
+             .downcase
+  clue['answer'] = Sanitize.fragment(answer)
+  clue
+end
+
+def build_category_cache
+  offset = 0
+
+  loop do
+    uri = "http://jservice.io/api/categories?count=100&offset=#{offset}"
+    request = HTTParty.get(uri)
+    response = JSON.parse(request.body)
+    response.each do |category|
+      if category['clues_count'] >= 5   # Skip categories with not enough clues for a game
+        # Not necessary for now
+        # $redis.hmset(key, :title, category['title'], :count, category['clue_count'],
+        #              :used_count, 0, :veto_count, 0)0
+        $redis.sadd('categories', category['id']) # Have a category set because of the super useful SRANDMEMBER
+      end
+    end
+    break if response.size == 0 || offset >= 25000 # For safety or something
+    offset = offset + 100
+  end
+end
+
+def get_random_question
   uri = 'http://jservice.io/api/random?count=1'
   request = HTTParty.get(uri)
   puts "[LOG] #{request.body}"
