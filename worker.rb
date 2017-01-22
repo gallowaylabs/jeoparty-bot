@@ -16,7 +16,7 @@ class JeopartyBot < SlackRubyBot::Bot
 
     # Only post a question if none is in progress
     unless $redis.exists(current_key)
-      clue = get_clue(data.channel)
+      clue = get_next_clue(data.channel)
 
       if clue.nil?
         # Game is over, show the scoreboard
@@ -25,8 +25,10 @@ class JeopartyBot < SlackRubyBot::Bot
           name = get_user(user[:user_id])
           players << "#{i + 1}. #{name['real']}: #{user[:score]}"
         end
-        client.say(text: "The game is over! The scores for this game were:\n> #{players.join("\n")}",
-                   channel: data.channel)
+        unless players.nil?
+          client.say(text: "The game is over :tada: The scores for this game were:\n> #{players.join("\n>")}",
+                     channel: data.channel)
+        end
       else
         # On to the next clue
         air_date = Time.iso8601(clue['airdate']).to_i
@@ -39,6 +41,7 @@ class JeopartyBot < SlackRubyBot::Bot
                 fallback: "#{clue['category']['title']} for $#{clue['value']}: `#{clue['question']}`",
                 title: "#{clue['category']['title']} for $#{clue['value']}",
                 text: "#{clue['question']}",
+                footer: "Clue #{clue['id']}",
                 ts: "#{air_date}"
               }
             ]
@@ -70,7 +73,7 @@ class JeopartyBot < SlackRubyBot::Bot
         if is_correct?(answer['answer'], data.text)
           clue_answered(data.channel, answer)
           score = update_score(data.channel, data.user, answer['value'])
-          client.say(text: "That is the correct answer <@#{data.user}>! Your score is now #{score}", channel: data.channel)
+          client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{score}", channel: data.channel)
         else
           score = update_score(data.channel, data.user, answer['value'] * -1)
           client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{score}", channel: data.channel)
@@ -93,6 +96,7 @@ class JeopartyBot < SlackRubyBot::Bot
     # Only start a new game if the previous game is over or
     # hasn't started yet (e.g. if the categories sound bad)
     if clue_count.nil? || clue_count == 0 || clue_count == 30
+      clean_old_game(data.channel)
       category_names = build_game(data.channel)
 
       client.say(text: "*Starting a new game!* The categories today are:\n #{category_names.join("\n")}",
@@ -102,6 +106,11 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
+  match /^clues remaining/ do |client, data, match|
+    clue_count = $redis.scard("game:#{data.channel}:clues")
+    client.say(text: "There are #{clue_count} clues remaining", channel: data.channel)
+  end
+
   match /^show scoreboard/ do |client, data, match|
     players = []
     get_scoreboard(data.channel).each_with_index do |user, i|
@@ -109,23 +118,42 @@ class JeopartyBot < SlackRubyBot::Bot
       players << "#{i + 1}. #{name['real']}: #{user[:score]}"
     end
 
-    client.say(text: "The scores for this game are:\n> #{players.join("\n")}", channel: data.channel)
+    unless players.empty?
+      client.say(text: "The scores for this game are:\n> #{players.join("\n>")}", channel: data.channel)
+    end
+  end
+
+  match /^judges (?<verb>correct|incorrect) \<@(?<user>[\w\d]*)\>\s* (?<clue>[\d]*)/i do |client, data, match|
+
+    if !match[:verb].nil? && !match[:user].nil? && !match[:clue].nil? && is_moderator?(data.user)
+      clue = get_clue(data.channel, match[:clue])
+      unless clue.nil?
+        # Double value to make up for the lost points
+        new_score = update_score(data.channel, match[:user], clue['value'].to_i * 2, match[:verb].downcase == 'correct')
+        client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{new_score}",
+                   channel: data.channel)
+      end
+
+    end
   end
 
   match /^show leaderboard/ do |client, data, match|
     players = []
     get_leaderboard(data.channel).each_with_index do |user, i|
-      puts user
       name = get_user(user[:user_id])
       players << "#{i + 1}. #{name['real']}: #{user[:score]}"
     end
 
-    client.say(text: "The top players across all games are\n> #{players.join("\n")}", channel: data.channel)
+    client.say(text: "The top players across all games are\n> #{players.join("\n>")}", channel: data.channel)
   end
 
   command 'build cache' do |client, data, match|
-    build_category_cache
-    client.say(text:'done', channel: data.channel)
+    if is_moderator?(data.user)
+      client.say(text:'On it :+1:', channel: data.channel)
+      build_category_cache
+      client.say(text:'Cache (re)build complete', channel: data.channel)
+    end
+
   end
 
   match /^use token (?<token>[\w\d]*)\s*/ do |client, data, match|
@@ -135,7 +163,6 @@ class JeopartyBot < SlackRubyBot::Bot
       client.say(text: 'You are now a global moderator. Add other moderators with `add moderator @name`',
                  channel: data.channel)
     end
-    puts data
   end
 
   match /^add moderator \<@(?<user>[\w\d]*)\>\s*/ do |client, data, match|
@@ -169,7 +196,7 @@ def is_moderator?(user_id)
 end
 
 # Get a clue, remove it from the pool and mark it as active in one 'transaction'
-def get_clue(channel)
+def get_next_clue(channel)
   game_clue_key = "game:#{channel}:clues"
   current_clue_key = "game:#{channel}:current"
 
@@ -185,6 +212,13 @@ def get_clue(channel)
       # TODO: Timeout is nice so the game state isn't totally hosed if something goes wrong
     end
     parsed_clue
+  end
+end
+
+def get_clue(channel, clue_id)
+  clue = $redis.get("clue:#{channel}:#{clue_id}")
+  unless clue.nil?
+    JSON.parse(clue)
   end
 end
 
@@ -210,8 +244,11 @@ def build_game(channel)
 
     selected.each do |clue|
       clue_key = "clue:#{channel}:#{clue['id']}"
-      $redis.set(clue_key, clean_clue(clue).to_json)
-      $redis.sadd("game:#{channel}:clues", clue_key)
+      clue = clean_clue(clue)
+      unless clue.nil?  # Don't add degenerate clues
+        $redis.set(clue_key, clue.to_json)
+        $redis.sadd("game:#{channel}:clues", clue_key)
+      end
     end
 
     category_names.append(selected.first['category']['title'])
@@ -241,7 +278,11 @@ def clean_clue(clue)
                      .gsub(/\s+(&nbsp;|&)\s+/i, ' and ')
                      .strip
                      .downcase
-  clue
+
+  # Skip clues with empty questions or answers or if they've been voted as invalid
+  if (!clue['answer'].nil? || !clue['question'].nil?) && clue['invalid_count'].nil?
+    clue
+  end
 end
 
 def build_category_cache
