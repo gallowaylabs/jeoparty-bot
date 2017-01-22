@@ -127,6 +127,23 @@ class JeopartyBot < SlackRubyBot::Bot
     build_category_cache
     client.say(text:'done', channel: data.channel)
   end
+
+  match /^use token (?<token>[\w\d]*)\s*/ do |client, data, match|
+    if !match[:token].nil? && match[:token] == ENV['GLOBAL_MOD_TOKEN']
+      $redis.sadd('global_moderators', data.user)
+      $redis.sadd('moderators', data.user)
+      client.say(text: 'You are now a global moderator. Add other moderators with `add moderator @name`',
+                 channel: data.channel)
+    end
+    puts data
+  end
+
+  match /^add moderator \<@(?<user>[\w\d]*)\>\s*/ do |client, data, match|
+    if $redis.sismember('global_moderators', data.user) && !match[:user].nil?
+      $redis.sadd('moderators', match[:user])
+      client.say(text: "<@#{match[:user]}> is now a moderator", channel: data.channel)
+    end
+  end
 end
 
 def is_correct?(correct, response)
@@ -145,6 +162,10 @@ def is_correct?(correct, response)
   puts "[LOG] Correct answer: #{correct} | User answer: #{response} | Similarity: #{similarity}"
 
   correct == response || similarity >= ENV['SIMILARITY_THRESHOLD'].to_f
+end
+
+def is_moderator?(user_id)
+  $redis.sismember('global_moderators', user_id) || $redis.sismember('moderators', user_id)
 end
 
 # Get a clue, remove it from the pool and mark it as active in one 'transaction'
