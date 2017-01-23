@@ -145,7 +145,7 @@ class JeopartyBot < SlackRubyBot::Bot
   end
 
   command 'build category cache' do |client, data, match|
-    if User.get(data.user).is_moderator?
+    if User.get(data.user).is_moderator?(true)
       client.say(text:'On it :+1:', channel: data.channel)
       Admin.build_category_cache
       client.say(text:'Category cache (re)build complete', channel: data.channel)
@@ -161,14 +161,14 @@ class JeopartyBot < SlackRubyBot::Bot
   end
 
   command 'sleep' do |client, data, match|
-    if User.get(data.user).is_moderator?(true)
+    if User.get(data.user).is_moderator?
       Admin.sleep!
       client.say(text:'Going to sleep :sleeping:', channel: data.channel)
     end
   end
 
   command 'wake' do |client, data, match|
-    if User.get(data.user).is_moderator?(true)
+    if User.get(data.user).is_moderator?
       Admin.wake!
       client.say(text:':sunny: Ready for a game? Type `new game`!', channel: data.channel)
     end
@@ -198,8 +198,6 @@ class JeopartyBot < SlackRubyBot::Bot
     end
     players
   end
-
-
 end
 
 def format_currency(input)
