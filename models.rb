@@ -179,10 +179,9 @@ class Game < Mapper::Model
 
   def _clean_clue(clue)
     clue['value'] = 200 if clue['value'].nil?
-    clue['answer'] = Sanitize.fragment(clue['answer'])
+    clue['answer'] = Sanitize.fragment(clue['answer'].gsub(/\s+(&nbsp;|&)\s+/i, ' and '))
                        .gsub(/[^\w\s]/i, '')
                        .gsub(/^(the|a|an) /i, '')
-                       .gsub(/\s+(&nbsp;|&)\s+/i, ' and ')
                        .strip
                        .downcase
 
@@ -299,6 +298,21 @@ class Admin < Mapper::Model
       break if response.size == 0 || offset >= 25000 # For safety or something
       offset = offset + 100
     end
+  end
+
+  def self.asleep?
+    self.redis.exists('sleep_mode')
+  end
+
+  def self.sleep!(seconds = nil)
+    self.redis.set('sleep_mode', 'yes')
+    unless seconds.nil?
+      self.redis.expire('sleep_mode', seconds)
+    end
+  end
+
+  def self.wake!
+    self.redis.del('sleep_mode')
   end
 
   def self.flush!

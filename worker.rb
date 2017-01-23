@@ -82,14 +82,19 @@ class JeopartyBot < SlackRubyBot::Bot
   match /^(new|start) game/ do |client, data, match|
     clue_count = Game.in(data.channel).remaining_clue_count
 
-    # Only start a new game if the previous game is over
-    if clue_count.nil? || clue_count == 0
-      category_names = Game.in(data.channel).new_game
-
-      client.say(text: "*Starting a new game!* The categories today are:\n #{category_names.join("\n")}",
+    if Admin.asleep?
+      client.say(text: "Bot is currently sleeping. Moderators may wake it up with `<@#{client.self.id}> wake`",
                  channel: data.channel)
     else
-      client.say(text: "Not yet! There are still #{clue_count} clues remaining", channel: data.channel)
+      # Only start a new game if the previous game is over
+      if clue_count.nil? || clue_count == 0
+        category_names = Game.in(data.channel).new_game
+
+        client.say(text: "*Starting a new game!* The categories today are:\n #{category_names.join("\n")}",
+                   channel: data.channel)
+      else
+        client.say(text: "Not yet! There are still #{clue_count} clues remaining", channel: data.channel)
+      end
     end
   end
 
@@ -116,12 +121,14 @@ class JeopartyBot < SlackRubyBot::Bot
 
   match /^show leaderboard/ do |client, data, match|
     players = format_board(Game.in(data.channel).leaderboard)
-    client.say(text: "The lowest scoring players across all games are\n> #{players.join("\n>")}", channel: data.channel)
+    client.say(text: "The highest scoring players across all games are\n> #{players.join("\n>")}",
+               channel: data.channel)
   end
 
   match /^show loserboard/ do |client, data, match|
     players = format_board(Game.in(data.channel).leaderboard(true))
-    client.say(text: "The highest scoring players across all games are\n> #{players.join("\n>")}", channel: data.channel)
+    client.say(text: "The lowest scoring players across all games are\n> #{players.join("\n>")}",
+               channel: data.channel)
   end
 
   match /^judges (?<verb>correct|incorrect) \<@(?<user>[\w\d]*)\>\s* (?<clue>[\d]*)/i do |client, data, match|
@@ -153,6 +160,20 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
+  command 'sleep' do |client, data, match|
+    if User.get(data.user).is_moderator?(true)
+      Admin.sleep!
+      client.say(text:'Going to sleep :sleeping:', channel: data.channel)
+    end
+  end
+
+  command 'wake' do |client, data, match|
+    if User.get(data.user).is_moderator?(true)
+      Admin.wake!
+      client.say(text:':sunny: Ready for a game? Type `new game`!', channel: data.channel)
+    end
+  end
+
   match /^use token (?<token>[\w\d]*)\s*/ do |client, data, match|
     if !match[:token].nil? && match[:token] == ENV['GLOBAL_MOD_TOKEN']
       User.get(data.user).make_moderator(true)
@@ -173,11 +194,18 @@ class JeopartyBot < SlackRubyBot::Bot
     players = []
     board.each_with_index do |user, i|
       name = User.get(user[:user_id]).profile
-      players << "#{i + 1}. #{name['real']}: #{user[:score]}"
+      players << "#{i + 1}. #{name['real']}: #{format_currency(user[:score])}"
     end
     players
   end
+
+
 end
+
+def format_currency(input)
+  input.to_s.reverse.gsub(%r{([0-9]{3}(?=([0-9])))}, "\\1,").reverse
+end
+
 
 EM.run do
   # Load .env vars
