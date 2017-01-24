@@ -64,7 +64,7 @@ class JeopartyBot < SlackRubyBot::Bot
     if verdict[:duplicate]
       client.say(text: "Only one guess per clue is allowed <@#{data.user}>!", channel: data.channel)
     elsif verdict[:correct]
-      client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{format_currency([:score])}",
+      client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{format_currency(verdict[:score])}",
                  channel: data.channel)
     elsif !verdict[:clue_gone] && !verdict[:correct]
       client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{format_currency(verdict[:score])}",
