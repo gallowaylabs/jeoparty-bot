@@ -10,8 +10,6 @@ require 'text'
 
 require_relative 'models.rb'
 
-SlackRubyBot::Client.logger.level = Logger::WARN
-
 class JeopartyBot < SlackRubyBot::Bot
   match /^next\s*($|answer|clue)/ do |client, data, match|
     clue = Game.in(data.channel).current_clue
@@ -66,10 +64,10 @@ class JeopartyBot < SlackRubyBot::Bot
     if verdict[:duplicate]
       client.say(text: "Only one guess per clue is allowed <@#{data.user}>!", channel: data.channel)
     elsif verdict[:correct]
-      client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{verdict[:score]}",
+      client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{format_currency([:score])}",
                  channel: data.channel)
     elsif !verdict[:clue_gone] && !verdict[:correct]
-      client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{verdict[:score]}",
+      client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{format_currency(verdict[:score])}",
                  channel: data.channel)
     end
   end
@@ -83,14 +81,15 @@ class JeopartyBot < SlackRubyBot::Bot
     clue_count = Game.in(data.channel).remaining_clue_count
 
     if Admin.asleep?
-      client.say(text: "Bot is currently sleeping. Moderators may wake it up with `<@#{client.self.id}> wake`",
+      client.say(text: "<@#{client.self.id}> is currently sleeping. Moderators may wake it up with `<@#{client.self.id}> wake`",
                  channel: data.channel)
     else
       # Only start a new game if the previous game is over
       if clue_count.nil? || clue_count == 0
         category_names = Game.in(data.channel).new_game
 
-        client.say(text: "*Starting a new game!* The categories today are:\n #{category_names.join("\n")}",
+        # Yes, the unicode bullet point makes me sad as well
+        client.say(text: "*Starting a new game!* The categories today are:\n• #{category_names.join("\n• ")}",
                    channel: data.channel)
       else
         client.say(text: "Not yet! There are still #{clue_count} clues remaining", channel: data.channel)
@@ -102,7 +101,7 @@ class JeopartyBot < SlackRubyBot::Bot
     if User.get(data.user).is_moderator?
       category_names = Game.in(data.channel).new_game
 
-      client.say(text: "*Starting a new game!* The categories today are:\n #{category_names.join("\n")}",
+      client.say(text: "*Starting a new game!* The categories today are:\n• #{category_names.join("\n• ")}",
                  channel: data.channel)
     end
   end
@@ -138,7 +137,7 @@ class JeopartyBot < SlackRubyBot::Bot
       unless clue.nil?
         # Double value to make up for the lost points
         new_score = User.get(match[:user]).update_score(data.channel, clue['value'].to_i * 2, match[:verb].downcase == 'correct')
-        client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{new_score}",
+        client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{format_currency(new_score)}",
                    channel: data.channel)
       end
     end
@@ -163,7 +162,7 @@ class JeopartyBot < SlackRubyBot::Bot
   command 'sleep' do |client, data, match|
     if User.get(data.user).is_moderator?
       Admin.sleep!
-      client.say(text:'Going to sleep :sleeping:', channel: data.channel)
+      client.say(text:"Going to sleep :sleeping:. Wake me up with `<@#{client.self.id}> wake`", channel: data.channel)
     end
   end
 
@@ -200,20 +199,23 @@ class JeopartyBot < SlackRubyBot::Bot
   end
 end
 
+# Format number as currency (i.e. with commas and a dollar sign)
 def format_currency(input)
-  input.to_s.reverse.gsub(%r{([0-9]{3}(?=([0-9])))}, "\\1,").reverse
+  formatted = input.to_s.reverse.gsub(%r{([0-9]{3}(?=([0-9])))}, "\\1,").reverse
+  formatted[0] == '-' ? '-$' + formatted[1..-1] : '$' + formatted
 end
-
 
 EM.run do
   # Load .env vars
   Dotenv.load
   # Disable output buffering
   $stdout.sync = true
-  
+
   # Set up redis
   uri = URI.parse(ENV['REDIS_URL'])
   Mapper.redis = Redis.new(host: uri.host, port: uri.port, password: uri.password)
+
+  SlackRubyBot::Client.logger.level = Logger::WARN
 
   bot1 = SlackRubyBot::Server.new(token: ENV['SLACK_API_TOKEN'], aliases: ['tb'])
   bot1.start_async
