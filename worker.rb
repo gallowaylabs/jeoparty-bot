@@ -58,7 +58,7 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^(what|whats|where|wheres|who|whos) /i do |client, data, match|
+  match /^(what|whats|where|wheres|who|whos|when|whens) /i do |client, data, match|
     verdict = Game.in(data.channel).attempt_answer(data.user, data.text)
 
     if verdict[:duplicate]
@@ -188,15 +188,55 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  # Format (leader|loser|score)board
-  def self.format_board(board)
-    players = []
-    board.each_with_index do |user, i|
-      name = User.get(user[:user_id]).profile
-      players << "#{i + 1}. #{name['real']}: #{format_currency(user[:score])}"
-    end
-    players
+  # Monkey patch help because of the extra junk that the framework adds
+  command 'help' do |client, data, match|
+    commands = SlackRubyBot::CommandsHelper.instance.bot_desc_and_commands
+    client.say(text: commands, channel: data.channel)
   end
+
+  help do
+    title 'Jeoparty Bot'
+    desc 'The punniest trivia questions since 1978'
+
+    command 'new game' do
+      desc 'Start a new game with the usual 6 categories of 5 questions each.'
+    end
+
+    command 'next' do
+      desc 'Give the next clue. Remember to answer in the form of a question!'
+    end
+
+    command 'what is <answer>' do
+      desc 'Try to solve the current clue with <answer>. Other valid triggers are who, what, and when.'
+    end
+
+    command 'show my score' do
+      desc 'Shows your score in the current game'
+    end
+
+    command 'show scoreboard' do
+      desc 'Shows all players scores in the current game'
+    end
+
+    command 'show leaderboard' do
+      desc 'Shows the top 10 players across all games'
+    end
+
+    command 'show loserboard' do
+      desc 'Shows the bottom 10 players across all games'
+    end
+  end
+
+end
+
+# Format (leader|loser|score)board
+def format_board(board)
+  players = []
+  board.each_with_index do |user, i|
+    name = User.get(user[:user_id]).profile
+    players << "#{i + 1}. #{name['real']}: #{format_currency(user[:score])}"
+  end
+  players
 end
 
 # Format number as currency (i.e. with commas and a dollar sign)
