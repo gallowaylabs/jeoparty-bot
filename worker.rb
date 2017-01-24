@@ -10,8 +10,6 @@ require 'text'
 
 require_relative 'models.rb'
 
-SlackRubyBot::Client.logger.level = Logger::WARN
-
 class JeopartyBot < SlackRubyBot::Bot
   match /^next\s*($|answer|clue)/ do |client, data, match|
     clue = Game.in(data.channel).current_clue
@@ -60,16 +58,16 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^(what|whats|where|wheres|who|whos) /i do |client, data, match|
+  match /^(what|whats|where|wheres|who|whos|when|whens) /i do |client, data, match|
     verdict = Game.in(data.channel).attempt_answer(data.user, data.text)
 
     if verdict[:duplicate]
       client.say(text: "Only one guess per clue is allowed <@#{data.user}>!", channel: data.channel)
     elsif verdict[:correct]
-      client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{verdict[:score]}",
+      client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{format_currency([:score])}",
                  channel: data.channel)
     elsif !verdict[:clue_gone] && !verdict[:correct]
-      client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{verdict[:score]}",
+      client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{format_currency(verdict[:score])}",
                  channel: data.channel)
     end
   end
@@ -83,14 +81,15 @@ class JeopartyBot < SlackRubyBot::Bot
     clue_count = Game.in(data.channel).remaining_clue_count
 
     if Admin.asleep?
-      client.say(text: "Bot is currently sleeping. Moderators may wake it up with `<@#{client.self.id}> wake`",
+      client.say(text: "<@#{client.self.id}> is currently sleeping. Moderators may wake it up with `<@#{client.self.id}> wake`",
                  channel: data.channel)
     else
       # Only start a new game if the previous game is over
       if clue_count.nil? || clue_count == 0
         category_names = Game.in(data.channel).new_game
 
-        client.say(text: "*Starting a new game!* The categories today are:\n #{category_names.join("\n")}",
+        # Yes, the unicode bullet point makes me sad as well
+        client.say(text: "*Starting a new game!* The categories today are:\n• #{category_names.join("\n• ")}",
                    channel: data.channel)
       else
         client.say(text: "Not yet! There are still #{clue_count} clues remaining", channel: data.channel)
@@ -102,7 +101,7 @@ class JeopartyBot < SlackRubyBot::Bot
     if User.get(data.user).is_moderator?
       category_names = Game.in(data.channel).new_game
 
-      client.say(text: "*Starting a new game!* The categories today are:\n #{category_names.join("\n")}",
+      client.say(text: "*Starting a new game!* The categories today are:\n• #{category_names.join("\n• ")}",
                  channel: data.channel)
     end
   end
@@ -138,14 +137,14 @@ class JeopartyBot < SlackRubyBot::Bot
       unless clue.nil?
         # Double value to make up for the lost points
         new_score = User.get(match[:user]).update_score(data.channel, clue['value'].to_i * 2, match[:verb].downcase == 'correct')
-        client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{new_score}",
+        client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{format_currency(new_score)}",
                    channel: data.channel)
       end
     end
   end
 
   command 'build category cache' do |client, data, match|
-    if User.get(data.user).is_moderator?
+    if User.get(data.user).is_moderator?(true)
       client.say(text:'On it :+1:', channel: data.channel)
       Admin.build_category_cache
       client.say(text:'Category cache (re)build complete', channel: data.channel)
@@ -161,14 +160,14 @@ class JeopartyBot < SlackRubyBot::Bot
   end
 
   command 'sleep' do |client, data, match|
-    if User.get(data.user).is_moderator?(true)
+    if User.get(data.user).is_moderator?
       Admin.sleep!
-      client.say(text:'Going to sleep :sleeping:', channel: data.channel)
+      client.say(text:"Going to sleep :sleeping:. Wake me up with `<@#{client.self.id}> wake`", channel: data.channel)
     end
   end
 
   command 'wake' do |client, data, match|
-    if User.get(data.user).is_moderator?(true)
+    if User.get(data.user).is_moderator?
       Admin.wake!
       client.say(text:':sunny: Ready for a game? Type `new game`!', channel: data.channel)
     end
@@ -189,33 +188,74 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  # Format (leader|loser|score)board
-  def self.format_board(board)
-    players = []
-    board.each_with_index do |user, i|
-      name = User.get(user[:user_id]).profile
-      players << "#{i + 1}. #{name['real']}: #{format_currency(user[:score])}"
-    end
-    players
+  # Monkey patch help because of the extra junk that the framework adds
+  command 'help' do |client, data, match|
+    commands = SlackRubyBot::CommandsHelper.instance.bot_desc_and_commands
+    client.say(text: commands, channel: data.channel)
   end
 
+  help do
+    title 'Jeoparty Bot'
+    desc 'The punniest trivia questions since 1978'
+
+    command 'new game' do
+      desc 'Start a new game with the usual 6 categories of 5 questions each.'
+    end
+
+    command 'next' do
+      desc 'Give the next clue. Remember to answer in the form of a question!'
+    end
+
+    command 'what is <answer>' do
+      desc 'Try to solve the current clue with <answer>. Other valid triggers are who, what, and when.'
+    end
+
+    command 'show my score' do
+      desc 'Shows your score in the current game'
+    end
+
+    command 'show scoreboard' do
+      desc 'Shows all players scores in the current game'
+    end
+
+    command 'show leaderboard' do
+      desc 'Shows the top 10 players across all games'
+    end
+
+    command 'show loserboard' do
+      desc 'Shows the bottom 10 players across all games'
+    end
+  end
 
 end
 
+# Format (leader|loser|score)board
+def format_board(board)
+  players = []
+  board.each_with_index do |user, i|
+    name = User.get(user[:user_id]).profile
+    players << "#{i + 1}. #{name['real']}: #{format_currency(user[:score])}"
+  end
+  players
+end
+
+# Format number as currency (i.e. with commas and a dollar sign)
 def format_currency(input)
-  input.to_s.reverse.gsub(%r{([0-9]{3}(?=([0-9])))}, "\\1,").reverse
+  formatted = input.to_s.reverse.gsub(%r{([0-9]{3}(?=([0-9])))}, "\\1,").reverse
+  formatted[0] == '-' ? '-$' + formatted[1..-1] : '$' + formatted
 end
-
 
 EM.run do
   # Load .env vars
   Dotenv.load
   # Disable output buffering
   $stdout.sync = true
-  
+
   # Set up redis
   uri = URI.parse(ENV['REDIS_URL'])
   Mapper.redis = Redis.new(host: uri.host, port: uri.port, password: uri.password)
+
+  SlackRubyBot::Client.logger.level = Logger::WARN
 
   bot1 = SlackRubyBot::Server.new(token: ENV['SLACK_API_TOKEN'], aliases: ['tb'])
   bot1.start_async
