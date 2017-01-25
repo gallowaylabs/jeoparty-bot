@@ -57,7 +57,7 @@ class Game < Mapper::Model
 
       category_vote_key = "game:#{channel}:category_vote"
       @redis.set(category_vote_key, 0)
-      @redis.expire(category_vote_key, 3*60) # 3 minutes
+      @redis.expire(category_vote_key, 2*60) # 2 minutes
     end
     category_names
   end
@@ -128,7 +128,7 @@ class Game < Mapper::Model
       valid_attempt = @redis.set("attempt:#{channel}:#{user}:#{clue['id']}", '',
                                  ex: ENV['ANSWER_TIME_SECONDS'].to_i * 2, nx: true)
       if valid_attempt
-        response[:correct] = _is_correct?(clue['answer'], guess)
+        response[:correct] = _is_correct?(clue, guess)
         response[:score] = User.get(user).update_score(channel, clue['value'], response[:correct])
 
         if response[:correct]
@@ -142,7 +142,7 @@ class Game < Mapper::Model
     response
   end
 
-  def _is_correct?(correct, response)
+  def _is_correct?(clue, response)
     response = response
                  .gsub(/\s+(&nbsp;|&)\s+/i, ' and ')
                  .gsub(/[^\w\s]/i, '')
@@ -154,10 +154,17 @@ class Game < Mapper::Model
                  .downcase
 
     white = Text::WhiteSimilarity.new
-    similarity = white.similarity(correct, response)
-    puts "[LOG] Correct answer: #{correct} | User answer: #{response} | Similarity: #{similarity}"
+    similarity = white.similarity(clue['answer'], response)
 
-    correct == response || similarity >= ENV['SIMILARITY_THRESHOLD'].to_f
+    alt_similarity = 0
+    unless clue['alternate'].nil?
+      alt_similarity = white.similarity(clue['alternate'], response)
+    end
+
+    puts "[LOG] User answer: #{response} | Correct answer (#{similarity}): #{clue['answer']} | Alternate answer (#{alt_similarity}): #{clue['alternate']}"
+
+    clue['answer'] == response || clue['alternate'] == response ||
+      similarity >= ENV['SIMILARITY_THRESHOLD'].to_f || alt_similarity >= ENV['SIMILARITY_THRESHOLD'].to_f
   end
 
   def remaining_clue_count
@@ -194,16 +201,33 @@ class Game < Mapper::Model
   end
 
   def category_vote(score)
-    @redis.incrby("game:#{channel}:category_vote", score)
+    key = "game:#{channel}:category_vote"
+    if @redis.exists(key)
+      @redis.incrby("game:#{channel}:category_vote", score)
+    end
   end
 
   def _clean_clue(clue)
     clue['value'] = 200 if clue['value'].nil?
-    clue['answer'] = Sanitize.fragment(clue['answer'].gsub(/\s+(&nbsp;|&)\s+/i, ' and '))
-                       .gsub(/[^\w\s]/i, '')
+    answer_sanitized = Sanitize.fragment(clue['answer'].gsub(/\s+(&nbsp;|&)\s+/i, ' and '))
                        .gsub(/^(the|a|an) /i, '')
                        .strip
                        .downcase
+
+    # Parens at the end often indicate alternative answers that may be used instead of the primary answer
+    alternate = answer_sanitized.match(/.+\((.*)\)/)
+    unless alternate.nil?
+      clue['alternate'] = alternate[1].gsub(/^(or|alternatively|alternate) /i, '').gsub(/[^\/[[:alnum:]]\s\-]/i, '')
+    end
+
+    # Parens at the beginning often indicate optional first names, so the alternate here
+    # is for if the user used the whole name as the "answer" now has the optional first part removed
+    alternate = answer_sanitized.match(/^\((.*)\)/)
+    unless alternate.nil?
+      clue['alternate'] = answer_sanitized.gsub(/[^\/[[:alnum:]]\s\-]/i, '')
+    end
+
+    clue['answer'] = answer_sanitized.gsub(/\(.*\)/, '').gsub(/[^\/[[:alnum:]]\s\-]/i, '')
 
     # Skip clues with empty questions or answers or if they've been voted as invalid
     if (!clue['answer'].nil? || !clue['question'].nil?) && clue['invalid_count'].nil?

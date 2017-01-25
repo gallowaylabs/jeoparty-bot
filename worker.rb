@@ -66,17 +66,17 @@ module Jeoparty
       if verdict[:duplicate]
         client.say(text: "Only one guess per clue is allowed <@#{data.user}>!", channel: data.channel)
       elsif verdict[:correct]
-        client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{format_currency(verdict[:score])}",
+        client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{Util.format_currency(verdict[:score])}",
                    channel: data.channel)
       elsif !verdict[:clue_gone] && !verdict[:correct]
-        client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{format_currency(verdict[:score])}",
+        client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{Util.format_currency(verdict[:score])}",
                    channel: data.channel)
       end
     end
 
     match /^show\s*(my)?\s*score\s*$/i do |client, data, match|
       score = User.get(data.user).score(data.channel)
-      client.say(text: "<@#{data.user}>, your score is #{format_currency(score)}", channel: data.channel)
+      client.say(text: "<@#{data.user}>, your score is #{Util.format_currency(score)}", channel: data.channel)
     end
 
     match /^(new|start) game/i do |client, data, match|
@@ -100,12 +100,10 @@ module Jeoparty
       end
     end
 
-    match /^shuffle categories/i do |client, data, match|
+    match /^skip\s?(clue)?/i do |client, data, match|
       if User.get(data.user).is_moderator?
-        category_names = Game.in(data.channel).new_game
-
-        client.say(text: "*Starting a new game!* The categories today are:\n• #{category_names.join("\n• ")}",
-                   channel: data.channel)
+        Game.in(data.channel).clue_answered
+        client.say(text: 'Clue skipped!', channel: data.channel)
       end
     end
 
@@ -139,15 +137,31 @@ module Jeoparty
         unless clue.nil?
           if match[:verb] == reset
             new_score = User.get(match[:user]).update_score(data.channel, clue['value'])
-            client.say(text: "<@#{match[:user]}>, your score is now #{format_currency(new_score)}",
+            client.say(text: "<@#{match[:user]}>, your score is now #{Util.format_currency(new_score)}",
                        channel: data.channel)
           else
             # Double value to make up for the lost points
             new_score = User.get(match[:user]).update_score(data.channel, clue['value'].to_i * 2, match[:verb].downcase == 'correct')
-            client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{format_currency(new_score)}",
+            client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{Util.format_currency(new_score)}",
                        channel: data.channel)
           end
         end
+      end
+    end
+
+    command 'shuffle categories' do |client, data, match|
+      if User.get(data.user).is_moderator?
+        category_names = Game.in(data.channel).new_game
+
+        client.say(text: "*Starting a new game!* The categories today are:\n• #{category_names.join("\n• ")}",
+                   channel: data.channel)
+      end
+    end
+
+    command 'cancel game' do |client, data, match|
+      if User.get(data.user).is_moderator?
+        Game.in(data.channel).cleanup
+        client.say(text:'Game cancelled', channel: data.channel)
       end
     end
 
@@ -164,13 +178,6 @@ module Jeoparty
         Admin.flush!
         client.say(text:'Database flushed. Be sure to `build category cache` before starting a new game',
                    channel: data.channel)
-      end
-    end
-
-    command 'cancel game' do |client, data, match|
-      if User.get(data.user).is_moderator?
-        Game.in(data.channel).cleanup
-        client.say(text:'Game cancelled', channel: data.channel)
       end
     end
 
@@ -225,6 +232,10 @@ module Jeoparty
         desc 'Try to solve the current clue with <answer>. Other valid triggers are who, what, and when.'
       end
 
+      command 'clues remaining' do
+        desc 'The number of clues remaining in the current game'
+      end
+
       command 'show my score' do
         desc 'Shows your score in the current game'
       end
@@ -240,6 +251,10 @@ module Jeoparty
       command 'show loserboard' do
         desc 'Shows the bottom 10 players across all games'
       end
+
+      command 'skip' do
+        desc '(Moderator only) Skip the current clue'
+      end
     end
 
     # Format (leader|loser|score)board
@@ -247,7 +262,7 @@ module Jeoparty
       players = []
       board.each_with_index do |user, i|
         name = User.get(user[:user_id]).profile
-        players << "#{i + 1}. #{name['real']}: #{format_currency(user[:score])}"
+        players << "#{i + 1}. #{name['real']}: #{Util.format_currency(user[:score])}"
       end
       players
     end
