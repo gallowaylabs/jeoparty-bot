@@ -11,7 +11,7 @@ require 'text'
 require_relative 'models.rb'
 
 class JeopartyBot < SlackRubyBot::Bot
-  match /^next\s*($|answer|clue)/ do |client, data, match|
+  match /^next\s*($|answer|clue)/i do |client, data, match|
     clue = Game.in(data.channel).current_clue
 
     # Only post a question if none is in progress
@@ -72,12 +72,12 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^show\s*(my)?\s*score\s*$/ do |client, data, match|
+  match /^show\s*(my)?\s*score\s*$/i do |client, data, match|
     score = User.get(data.user).score(data.channel)
     client.say(text: "<@#{data.user}>, your score is #{score}", channel: data.channel)
   end
 
-  match /^(new|start) game/ do |client, data, match|
+  match /^(new|start) game/i do |client, data, match|
     clue_count = Game.in(data.channel).remaining_clue_count
 
     if Admin.asleep?
@@ -97,7 +97,7 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^shuffle categories/ do |client, data, match|
+  match /^shuffle categories/i do |client, data, match|
     if User.get(data.user).is_moderator?
       category_names = Game.in(data.channel).new_game
 
@@ -106,39 +106,44 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^clues remaining/ do |client, data, match|
+  match /^clues remaining/i do |client, data, match|
     clue_count = Game.in(data.channel).remaining_clue_count
     client.say(text: "There are #{clue_count} clues remaining", channel: data.channel)
   end
 
-  match /^show scoreboard/ do |client, data, match|
+  match /^show scoreboard/i do |client, data, match|
     players = format_board(Game.in(data.channel).scoreboard)
     unless players.empty?
       client.say(text: "The scores for this game are:\n> #{players.join("\n>")}", channel: data.channel)
     end
   end
 
-  match /^show leaderboard/ do |client, data, match|
+  match /^show leaderboard/i do |client, data, match|
     players = format_board(Game.in(data.channel).leaderboard)
     client.say(text: "The highest scoring players across all games are\n> #{players.join("\n>")}",
                channel: data.channel)
   end
 
-  match /^show loserboard/ do |client, data, match|
+  match /^show loserboard/i do |client, data, match|
     players = format_board(Game.in(data.channel).leaderboard(true))
     client.say(text: "The lowest scoring players across all games are\n> #{players.join("\n>")}",
                channel: data.channel)
   end
 
-  match /^judges (?<verb>correct|incorrect) \<@(?<user>[\w\d]*)\>\s* (?<clue>[\d]*)/i do |client, data, match|
+  match /^judges (?<verb>correct|incorrect|reset) \<@(?<user>[\w\d]*)\>\s* (?<clue>[\d]*)/i do |client, data, match|
     if !match[:verb].nil? && !match[:user].nil? && !match[:clue].nil? && User.get(data.user).is_moderator?
       clue = Game.in(data.channel).get_clue(match[:clue])
-      puts clue
       unless clue.nil?
-        # Double value to make up for the lost points
-        new_score = User.get(match[:user]).update_score(data.channel, clue['value'].to_i * 2, match[:verb].downcase == 'correct')
-        client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{format_currency(new_score)}",
-                   channel: data.channel)
+        if match[:verb] == reset
+          new_score = User.get(match[:user]).update_score(data.channel, clue['value'])
+          client.say(text: "<@#{match[:user]}>, your score is now #{format_currency(new_score)}",
+                     channel: data.channel)
+        else
+          # Double value to make up for the lost points
+          new_score = User.get(match[:user]).update_score(data.channel, clue['value'].to_i * 2, match[:verb].downcase == 'correct')
+          client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{format_currency(new_score)}",
+                     channel: data.channel)
+        end
       end
     end
   end
@@ -173,7 +178,7 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^use token (?<token>[\w\d]*)\s*/ do |client, data, match|
+  match /^use token (?<token>[\w\d]*)\s*/i do |client, data, match|
     if !match[:token].nil? && match[:token] == ENV['GLOBAL_MOD_TOKEN']
       User.get(data.user).make_moderator(true)
       client.say(text: 'You are now a global moderator. Add other moderators with `add moderator @name`',
@@ -181,7 +186,7 @@ class JeopartyBot < SlackRubyBot::Bot
     end
   end
 
-  match /^add moderator \<@(?<user>[\w\d]*)\>\s*/ do |client, data, match|
+  match /^add moderator \<@(?<user>[\w\d]*)\>\s*/i do |client, data, match|
     if User.get(data.user).is_moderator?(true) && !match[:user].nil?
       User.get(match[:user]).make_moderator
       client.say(text: "<@#{match[:user]}> is now a moderator", channel: data.channel)
