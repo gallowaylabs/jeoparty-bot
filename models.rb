@@ -54,6 +54,10 @@ class Game < Mapper::Model
       end
 
       category_names.append(selected.first['category']['title'])
+
+      category_vote_key = "game:#{channel}:category_vote"
+      @redis.set(category_vote_key, 0)
+      @redis.expire(category_vote_key, 3*60) # 3 minutes
     end
     category_names
   end
@@ -71,6 +75,7 @@ class Game < Mapper::Model
     end
     @redis.del("game:#{channel}:clues")
     @redis.del("game:#{channel}:current")
+    @redis.del("game:#{channel}:category_vote")
   end
 
   # Get clue from the current game by ID
@@ -115,7 +120,7 @@ class Game < Mapper::Model
   end
 
   # Attempt to answer the clue
-  def attempt_answer(user, guess)
+  def attempt_answer(user, guess, timestamp)
     clue = current_clue
     response = {duplicate: false, correct: false, clue_gone: clue.nil?, score: 0}
 
@@ -123,13 +128,13 @@ class Game < Mapper::Model
       valid_attempt = @redis.set("attempt:#{channel}:#{user}:#{clue['id']}", '',
                                  ex: ENV['ANSWER_TIME_SECONDS'].to_i * 2, nx: true)
       if valid_attempt
-        if _is_correct?(clue['answer'], guess)
+        response[:correct] = _is_correct?(clue['answer'], guess)
+        response[:score] = User.get(user).update_score(channel, clue['value'], response[:correct])
+
+        if response[:correct]
           clue_answered
-          response[:score] = User.get(user).update_score(channel, clue['value'])
-          response[:correct] = true
-        else
-          response[:score] = User.get(user).update_score(channel, clue['value'] * -1)
         end
+        _record_answer(user, clue, response[:correct], timestamp)
       else
         response[:duplicate] = true
       end
@@ -177,6 +182,21 @@ class Game < Mapper::Model
     end
   end
 
+  def moderator_update_score(user, timestamp, reset = false)
+    key = "response:#{channel}:#{user}:#{timestamp}"
+    response = @redis.hgetall(key)
+    unless response.nil?
+      # correct != true because we want correct answers to be subtracted from and incorrect to be added to
+      value = reset ? response['value'].to_i : response['value'].to_i * 2
+      User.get(user).update_score(channel, value, response['correct'] != 'true')
+      @redis.del(key) # Avoid double score modifications
+    end
+  end
+
+  def category_vote(score)
+    @redis.incrby("game:#{channel}:category_vote", score)
+  end
+
   def _clean_clue(clue)
     clue['value'] = 200 if clue['value'].nil?
     clue['answer'] = Sanitize.fragment(clue['answer'].gsub(/\s+(&nbsp;|&)\s+/i, ' and '))
@@ -191,6 +211,13 @@ class Game < Mapper::Model
     end
   end
 
+  def _record_answer(user, clue, correct, timestamp)
+    key = "response:#{channel}:#{user}:#{timestamp}"
+    @redis.pipelined do
+      @redis.hmset(key, 'clue_id', clue['id'], 'value', clue['value'], 'correct', correct)
+      @redis.expire(key, 600) # 10 minute review time
+    end
+  end
 end
 
 class User < Mapper::Model
