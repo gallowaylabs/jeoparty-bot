@@ -195,8 +195,8 @@ class Game < Mapper::Model
     unless response.nil?
       # correct != true because we want correct answers to be subtracted from and incorrect to be added to
       value = reset ? response['value'].to_i : response['value'].to_i * 2
-      User.get(user).update_score(channel, value, response['correct'] != 'true')
       @redis.del(key) # Avoid double score modifications
+      User.get(user).update_score(channel, value, response['correct'] != 'true')
     end
   end
 

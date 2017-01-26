@@ -135,14 +135,15 @@ module Jeoparty
       if !match[:verb].nil? && !match[:user].nil? && !match[:clue].nil? && User.get(data.user).is_moderator?
         clue = Game.in(data.channel).get_clue(match[:clue])
         unless clue.nil?
-          if match[:verb] == reset
-            new_score = User.get(match[:user]).update_score(data.channel, clue['value'])
+          if match[:verb] == 'reset'
+            new_score = User.get(match[:user]).update_score(data.channel, clue['value'].to_i)
             client.say(text: "<@#{match[:user]}>, your score is now #{Util.format_currency(new_score)}",
                        channel: data.channel)
           else
             # Double value to make up for the lost points
             new_score = User.get(match[:user]).update_score(data.channel, clue['value'].to_i * 2, match[:verb].downcase == 'correct')
-            client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. Your score is now #{Util.format_currency(new_score)}",
+            client.say(text: "<@#{match[:user]}>, the judges reviewed your answer and found that you were #{match[:verb].downcase}. "\
+                              "Your score is now #{Util.format_currency(new_score)}",
                        channel: data.channel)
           end
         end
@@ -208,6 +209,11 @@ module Jeoparty
         User.get(match[:user]).make_moderator
         client.say(text: "<@#{match[:user]}> is now a moderator", channel: data.channel)
       end
+    end
+
+    command 'about' do |client, data, match|
+      client.say(text: 'Jeoparty Bot is open source software. Pull requests welcome. For more information, visit https://github.com/esbdotio/jeoparty-bot',
+                 channel: data.channel)
     end
 
     # Monkey patch help because of the extra junk that the framework adds
