@@ -1,6 +1,7 @@
 require 'text'
 require 'json'
 require 'httparty'
+require 'sanitize'
 
 require_relative 'mapper'
 
@@ -20,12 +21,21 @@ module Jeoparty
       cleanup # Clean old game data/scores
 
       category_names = []
-      # Pick 6 random categories
-      categories = @redis.srandmember('categories', 6)
+      # Pick 12 random categories. The game will only use 6, but this gives wiggle room for weird
+      # situations where categories are unusable for one reason or another
+      categories = []
+      12.times { categories << rand(ENV['MAX_CATEGORY_ID'].to_i) }
+      categories.uniq!
+      valid_categories = 0
+
       categories.each do |category|
         uri = "http://jservice.io/api/clues?category=#{category}"
         request = HTTParty.get(uri)
         response = JSON.parse(request.body)
+
+        if response.empty?
+          next
+        end
 
         date_sorted = response.sort_by { |k| k['airdate']}
 
@@ -34,7 +44,7 @@ module Jeoparty
 
         selected.each do |clue|
           clue = _clean_clue(clue)
-          unless clue.nil?  # Don't add degenerate clues
+          unless clue.nil? || clue.empty?  # Don't add degenerate clues
             clue_key = "game_clue:#{channel}:#{clue['id']}"
             @redis.set(clue_key, clue.to_json)
             @redis.sadd("game:#{channel}:clues", clue_key)
@@ -42,11 +52,14 @@ module Jeoparty
         end
 
         category_names.append(selected.first['category']['title'])
-
-        category_vote_key = "game:#{channel}:category_vote"
-        @redis.set(category_vote_key, 0)
-        @redis.expire(category_vote_key, 2*60) # 2 minutes
+        valid_categories += 1
+        break if valid_categories >= 6
       end
+
+      category_vote_key = "game:#{channel}:category_vote"
+      @redis.set(category_vote_key, 0)
+      @redis.expire(category_vote_key, 2*60) # 2 minutes
+
       category_names
     end
 
