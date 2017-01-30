@@ -1,12 +1,7 @@
 require 'slack-ruby-bot'
 require 'eventmachine'
-require 'json'
-require 'httparty'
-require 'sanitize'
-require 'time'
 require 'dotenv'
 require 'redis'
-require 'text'
 
 require_relative 'models/game'
 require_relative 'models/user'
@@ -168,8 +163,8 @@ module Jeoparty
       end
     end
 
-    command 'build category cache' do |client, data, match|
-      if User.get(data.user).is_moderator?(true)
+    command 'build cache' do |client, data, match|
+      if User.get(data.user).is_global_moderator?
         client.say(text:'On it :+1:', channel: data.channel)
         Admin.build_category_cache
         client.say(text:'Category cache (re)build complete', channel: data.channel)
@@ -177,9 +172,9 @@ module Jeoparty
     end
 
     command 'flush database' do |client, data, match|
-      if User.get(data.user).is_moderator?(true)
+      if User.get(data.user).is_global_moderator?
         Admin.flush!
-        client.say(text:'Database flushed. Be sure to `build category cache` before starting a new game',
+        client.say(text:'Database flushed. Be sure to `build cache` before starting a new game',
                    channel: data.channel)
       end
     end
@@ -200,22 +195,26 @@ module Jeoparty
 
     match /^use token (?<token>[\w\d]*)\s*/i do |client, data, match|
       if !match[:token].nil? && match[:token] == ENV['GLOBAL_MOD_TOKEN']
-        User.get(data.user).make_moderator(true)
+        User.get(data.user).make_moderator(:global)
         client.say(text: 'You are now a global moderator. Add other moderators with `add moderator @name`',
                    channel: data.channel)
       end
     end
 
     match /^add moderator \<@(?<user>[\w\d]*)\>\s*/i do |client, data, match|
-      if User.get(data.user).is_moderator?(true) && !match[:user].nil?
+      if User.get(data.user).is_global_moderator? && !match[:user].nil?
         User.get(match[:user]).make_moderator
         client.say(text: "<@#{match[:user]}> is now a moderator", channel: data.channel)
       end
     end
 
     command 'about' do |client, data, match|
-      client.say(text: 'Jeoparty Bot is open source software. Pull requests welcome. For more information, visit https://github.com/esbdotio/jeoparty-bot',
-                 channel: data.channel)
+      about = %Q{Jeoparty Bot! is open source software. Pull requests welcome. \n
+Questions provided by jService: http://jservice.io/ \n
+Powered by slack-ruby-bot: https://github.com/slack-ruby/slack-ruby-bot \n
+Source code available at: https://github.com/esbdotio/jeoparty-bot.
+      }
+      client.say(text: about, channel: data.channel)
     end
 
     # Monkey patch help because of the extra junk that the framework adds
@@ -225,7 +224,7 @@ module Jeoparty
     end
 
     help do
-      title 'Jeoparty Bot'
+      title 'Jeoparty Bot!'
       desc 'The punniest trivia questions since 1978'
 
       command 'new game' do

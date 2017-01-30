@@ -1,3 +1,7 @@
+require 'text'
+require 'json'
+require 'httparty'
+
 require_relative 'mapper'
 
 module Jeoparty

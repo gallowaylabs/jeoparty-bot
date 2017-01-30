@@ -11,12 +11,16 @@ module Jeoparty
       user
     end
 
-    def is_moderator?(global = false)
-      @redis.sismember('global_moderators', user_id) || (!global && @redis.sismember('moderators', user_id))
+    def is_moderator?
+      @redis.sismember('global_moderators', user_id) || @redis.sismember('moderators', user_id)
     end
 
-    def make_moderator(global = false)
-      if global
+    def is_global_moderator?
+      @redis.sismember('global_moderators', user_id)
+    end
+
+    def make_moderator(options = nil)
+      if options == :global
         @redis.sadd('global_moderators', user_id)
       end
       @redis.sadd('moderators', user_id)
