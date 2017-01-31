@@ -16,6 +16,11 @@ module Jeoparty
       game
     end
 
+    # General game information
+    def info
+      @redis.hgetall("game:#{channel}:#{id}")
+    end
+
     # Start a new game
     def new_game
       cleanup # Clean old game data/scores
@@ -55,12 +60,13 @@ module Jeoparty
         valid_categories += 1
         break if valid_categories >= 6
       end
+      category_names
+    end
 
-      category_vote_key = "game:#{channel}:category_vote"
+    def start_category_vote(message_id)
+      category_vote_key = "game:#{channel}:vote:#{message_id}"
       @redis.set(category_vote_key, 0)
       @redis.expire(category_vote_key, 2*60) # 2 minutes
-
-      category_names
     end
 
     # Clean up artifacts of the previous game in this channel
@@ -201,10 +207,10 @@ module Jeoparty
       end
     end
 
-    def category_vote(score)
-      key = "game:#{channel}:category_vote"
+    def category_vote(message_id, score)
+      key = "game:#{channel}:vote:#{message_id}"
       if @redis.exists(key)
-        @redis.incrby("game:#{channel}:category_vote", score)
+        @redis.incrby(key, score)
       end
     end
 

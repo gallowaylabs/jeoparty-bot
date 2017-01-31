@@ -88,9 +88,13 @@ module Jeoparty
           category_names = Game.in(data.channel).new_game
 
           # Yes, the unicode bullet point makes me sad as well
-          client.say(text: "*Starting a new game!* The categories today are:\n• #{category_names.join("\n• ")}"\
-                            "\n\n Add :+1: or :-1: reactions to this post to keep or redo these categories",
-                     channel: data.channel)
+          message = client.web_client.chat_postMessage(
+            channel: data.channel,
+            as_user: true,
+            text: "*Starting a new game!* The categories today are:\n• #{category_names.join("\n• ")}"\
+                            "\n\n Add :+1: or :-1: reactions to this post to keep or redo these categories"
+          )
+          Game.in(data.channel).start_category_vote(message.ts)
         else
           client.say(text: "Not yet! There are still #{clue_count} clues remaining", channel: data.channel)
         end
