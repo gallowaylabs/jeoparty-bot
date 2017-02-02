@@ -7,23 +7,21 @@ require_relative 'mapper'
 
 module Jeoparty
   class Game < Mapper::Model
-    attr_accessor :channel, :redis
+    attr_accessor :id, :categories, :redis
 
-    def Game.in(channel)
-      game = Game.new
-      game.channel = channel
-      game.redis = Mapper.redis
-      game
-    end
-
-    # General game information
-    def info
-      @redis.hgetall("game:#{channel}:#{id}")
+    def Game.get(channel, id)
+      Game.new(channel, id)
     end
 
     # Start a new game
-    def new_game
-      cleanup # Clean old game data/scores
+    def initialize(channel, id)
+      @redis = Mapper.redis
+      @channel = channel
+      @id = id
+    end
+
+    def self.new_game(channel)
+      game = Game.new(channel, Time.now.to_f.to_s) # Ugly, but at least we can sort on it easily
 
       category_names = []
       # Pick 12 random categories. The game will only use 6, but this gives wiggle room for weird
@@ -50,9 +48,9 @@ module Jeoparty
         selected.each do |clue|
           clue = _clean_clue(clue)
           unless clue.nil? || clue.empty?  # Don't add degenerate clues
-            clue_key = "game_clue:#{channel}:#{clue['id']}"
-            @redis.set(clue_key, clue.to_json)
-            @redis.sadd("game:#{channel}:clues", clue_key)
+            clue_key = "game_clue:#{game.id}:#{clue['id']}"
+            game.redis.set(clue_key, clue.to_json)
+            game.redis.sadd("game:#{game.id}:clues", clue_key)
           end
         end
 
@@ -60,34 +58,27 @@ module Jeoparty
         valid_categories += 1
         break if valid_categories >= 6
       end
-      category_names
+      game.categories = category_names
+      game
     end
 
     def start_category_vote(message_id)
-      category_vote_key = "game:#{channel}:vote:#{message_id}"
+      category_vote_key = "game:#{@id}:vote:#{message_id}"
       @redis.set(category_vote_key, 0)
       @redis.expire(category_vote_key, 2*60) # 2 minutes
     end
 
-    # Clean up artifacts of the previous game in this channel
+    # Clean up artifacts of this game
     def cleanup
-      clue_keys = @redis.keys("game_clue:#{channel}:*")
-      clue_keys.each do |key|
-        @redis.del(key)
-      end
+      @redis.scan_each(:match => "game_clue:#{@id}:*"){ |key| @redis.del(key) }
 
-      user_score_keys = @redis.keys("game_score:#{channel}:*")
-      user_score_keys.each do |key|
-        @redis.del(key)
-      end
-      @redis.del("game:#{channel}:clues")
-      @redis.del("game:#{channel}:current")
-      @redis.del("game:#{channel}:category_vote")
+      @redis.del("game:#{@id}:clues")
+      @redis.del("game:#{@id}:current")
     end
 
     # Get clue from the current game by ID
     def get_clue(clue_id)
-      clue = @redis.get("game_clue:#{channel}:#{clue_id}")
+      clue = @redis.get("game_clue:#{@id}:#{clue_id}")
       unless clue.nil?
         JSON.parse(clue)
       end
@@ -95,7 +86,7 @@ module Jeoparty
 
     # Get the current clue in this game
     def current_clue
-      clue = @redis.get("game:#{channel}:current")
+      clue = @redis.get("game:#{@id}:current")
 
       unless clue.nil?
         JSON.parse(clue)
@@ -104,8 +95,8 @@ module Jeoparty
 
     # Get a clue, remove it from the pool and mark it as active in one 'transaction'
     def next_clue
-      game_clue_key = "game:#{channel}:clues"
-      current_clue_key = "game:#{channel}:current"
+      game_clue_key = "game:#{@id}:clues"
+      current_clue_key = "game:#{@id}:current"
 
       clue_key = @redis.srandmember(game_clue_key)
       unless clue_key.nil?
@@ -115,7 +106,6 @@ module Jeoparty
         @redis.pipelined do
           @redis.srem(game_clue_key, clue_key)
           @redis.set(current_clue_key, clue)
-          @redis.setex("unanswered:#{channel}:#{parsed_clue['id']}", ENV['ANSWER_TIME_SECONDS'].to_i + 15, '')
         end
         parsed_clue
       end
@@ -123,7 +113,7 @@ module Jeoparty
 
     # Mark clue as answered
     def clue_answered
-      @redis.del("game:#{channel}:current")
+      @redis.del("game:#{@id}:current")
     end
 
     # Attempt to answer the clue
@@ -132,11 +122,11 @@ module Jeoparty
       response = {duplicate: false, correct: false, clue_gone: clue.nil?, score: 0}
 
       unless clue.nil?
-        valid_attempt = @redis.set("attempt:#{channel}:#{user}:#{clue['id']}", '',
+        valid_attempt = @redis.set("attempt:#{@id}:#{user}:#{clue['id']}", '',
                                    ex: ENV['ANSWER_TIME_SECONDS'].to_i * 2, nx: true)
         if valid_attempt
           response[:correct] = _is_correct?(clue, guess)
-          response[:score] = User.get(user).update_score(channel, clue['value'], response[:correct])
+          response[:score] = User.get(user).update_score(@id, @channel, clue['value'], response[:correct])
 
           if response[:correct]
             clue_answered
@@ -175,46 +165,35 @@ module Jeoparty
     end
 
     def remaining_clue_count
-      @redis.scard("game:#{channel}:clues")
+      @redis.scard("game:#{@id}:clues")
     end
 
     def scoreboard
       leaders = []
-      @redis.scan_each(:match => "game_score:#{channel}:*"){ |key| user_id = key.gsub("game_score:#{channel}:", ''); leaders << { :user_id => user_id, :score => User.get(user_id).score(channel) } }
+      @redis.scan_each(:match => "game_score:#{@id}:*"){ |key| user_id = key.gsub("game_score:#{@id}:", ''); leaders << { :user_id => user_id, :score => User.get(user_id).score(@id) } }
       puts "[LOG] Scoreboard: #{leaders.to_s}"
       leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }
     end
 
-    def leaderboard(bottom = false)
-      leaders = []
-      @redis.scan_each(:match => "score:#{channel}:*"){ |key| user_id = key.gsub("score:#{channel}:", ''); leaders << { :user_id => user_id, :score => User.get(user_id).historic_score(channel) } }
-      puts "[LOG] Leaderboard: #{leaders.to_s}"
-      if bottom
-        leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.reverse.take(10)
-      else
-        leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.take(10)
-      end
-    end
-
     def moderator_update_score(user, timestamp, reset = false)
-      key = "response:#{channel}:#{user}:#{timestamp}"
+      key = "response:#{@id}:#{user}:#{timestamp}"
       response = @redis.hgetall(key)
       unless response.nil? or response.empty?
         # correct != true because we want correct answers to be subtracted from and incorrect to be added to
         value = reset ? response['value'].to_i : response['value'].to_i * 2
         @redis.del(key) # Avoid double score modifications
-        User.get(user).update_score(channel, value, response['correct'] != 'true')
+        User.get(user).update_score(@id, @channel, value, response['correct'] != 'true')
       end
     end
 
     def category_vote(message_id, score)
-      key = "game:#{channel}:vote:#{message_id}"
+      key = "game:#{@id}:vote:#{message_id}"
       if @redis.exists(key)
         @redis.incrby(key, score)
       end
     end
 
-    def _clean_clue(clue)
+    def self._clean_clue(clue)
       clue['value'] = 200 if clue['value'].nil?
       answer_sanitized = Sanitize.fragment(clue['answer'].gsub(/\s+(&nbsp;|&)\s+/i, ' and '))
                            .gsub(/^(the|a|an) /i, '')
@@ -243,7 +222,7 @@ module Jeoparty
     end
 
     def _record_answer(user, clue, correct, timestamp)
-      key = "response:#{channel}:#{user}:#{timestamp}"
+      key = "response:#{@id}:#{user}:#{timestamp}"
       @redis.pipelined do
         @redis.hmset(key, 'clue_id', clue['id'], 'value', clue['value'], 'correct', correct)
         @redis.expire(key, 600) # 10 minute review time

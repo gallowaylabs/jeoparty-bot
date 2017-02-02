@@ -34,8 +34,8 @@ module Jeoparty
       user
     end
 
-    def score(channel)
-      key = "game_score:#{channel}:#{user_id}"
+    def score(id)
+      key = "game_score:#{id}:#{user_id}"
       current_score = @redis.get(key)
       if current_score.nil?
         0
@@ -54,11 +54,11 @@ module Jeoparty
       end
     end
 
-    def update_score(channel, score, add = true)
-      game_key = "game_score:#{channel}:#{user_id}"
-      historic_key = "score:#{channel}:#{user_id}"
+    def update_score(game_id, channel_id, score, add = true)
+      game_key = "game_score:#{game_id}:#{user_id}"
+      historic_key = "score:#{channel_id}:#{user_id}"
 
-      @redis.sadd("players:#{channel}", user_id)
+      @redis.sadd("players:#{game_id}", user_id)
       if add
         @redis.incrby(game_key, score)
         @redis.incrby(historic_key, score)
@@ -74,7 +74,7 @@ module Jeoparty
       uri = "https://slack.com/api/users.info?user=#{user_id}&token=#{ENV['SLACK_API_TOKEN']}"
       request = HTTParty.get(uri)
       response = JSON.parse(request.body)
-      if response['ok']
+      if response['ok'] && !user_id.nil?
         user = response['user']
         # Strings are used as hash keys because redis won't make them into symbols during hmget
         name = { 'id' => user['id'], 'name' => user['name']}
