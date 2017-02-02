@@ -1,7 +1,7 @@
-# Jeoparty Bot
+# Jeoparty Bot!
 (sic)
 
-Yet another Jeopardy bot for Slack powered by the jService API. Uses the Slack Realtime API to facilitate more
+Yet another bot for Slack that asks Jeopardy-like trivia questions. Uses the Slack Realtime API to facilitate more
  convenient interaction between players and the bot. 
 
 ## Requirements
