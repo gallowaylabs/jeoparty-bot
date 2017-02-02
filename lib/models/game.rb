@@ -20,9 +20,17 @@ module Jeoparty
       @id = id
     end
 
-    def self.new_game(channel)
+    def self.new_game(channel, mode)
       game = Game.new(channel, Time.now.to_f.to_s) # Ugly, but at least we can sort on it easily
+      if mode == 'random'
+        self._build_random_game(game)
+      else
+        self._build_standard_game(game)
+      end
+      game
+    end
 
+    def self._build_standard_game(game)
       category_names = []
       # Pick 12 random categories. The game will only use 6, but this gives wiggle room for weird
       # situations where categories are unusable for one reason or another
@@ -59,7 +67,21 @@ module Jeoparty
         break if valid_categories >= 6
       end
       game.categories = category_names
-      game
+    end
+
+    def self._build_random_game(game)
+      uri = 'http://jservice.io/api/random?count=30'
+      request = HTTParty.get(uri)
+      response = JSON.parse(request.body)
+
+      response.each do |clue|
+        clue = _clean_clue(clue)
+        unless clue.nil? || clue.empty?  # Don't add degenerate clues
+          clue_key = "game_clue:#{game.id}:#{clue['id']}"
+          game.redis.set(clue_key, clue.to_json)
+          game.redis.sadd("game:#{game.id}:clues", clue_key)
+        end
+      end
     end
 
     def start_category_vote(message_id)
