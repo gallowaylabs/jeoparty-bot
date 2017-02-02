@@ -77,7 +77,7 @@ module Jeoparty
       client.say(text: "<@#{data.user}>, your score is #{Util.format_currency(score)}", channel: data.channel)
     end
 
-    match /^(new|start) game/i do |client, data, match|
+    match /^(new|start) (?<mode>random|standard|)\s*game/i do |client, data, match|
       clue_count = Channel.get(data.channel).game&.remaining_clue_count
 
       if Admin.asleep?
@@ -86,14 +86,20 @@ module Jeoparty
       else
         # Only start a new game if the previous game is over
         if clue_count.nil? || clue_count == 0
-          game = Channel.get(data.channel).new_game
+          game = Channel.get(data.channel).new_game(match[:mode])
 
+          if game.categories.nil?
+            text = %Q{*Starting a new game* 30 random clues have been chosen
+            \n Add :+1: or :-1: reactions to this post to keep or cancel this game mode}
+          else
+            text = %Q{*Starting a new game!* The categories today are:\n• #{game.categories.join("\n• ")}
+            \n\n Add :+1: or :-1: reactions to this post to keep or redo these categories}
+          end
           # Yes, the unicode bullet point makes me sad as well
           message = client.web_client.chat_postMessage(
             channel: data.channel,
             as_user: true,
-            text: "*Starting a new game!* The categories today are:\n• #{game.categories.join("\n• ")}"\
-                            "\n\n Add :+1: or :-1: reactions to this post to keep or redo these categories"
+            text: text
           )
           game.start_category_vote(message.ts)
         else

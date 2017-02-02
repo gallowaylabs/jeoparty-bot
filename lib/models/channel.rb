@@ -21,16 +21,16 @@ module Jeoparty
       @redis.exists("channel:#{@id}:current_game")
     end
 
-    def new_game
+    def new_game(mode)
       key = "channel:#{@id}:current_game"
       current = @redis.get(key)
       if Game.get(@id, current).remaining_clue_count > 0
         puts 'Game in progress'
         nil
       else
-        game = Game.new_game(@id)
+        game = Game.new_game(@id, mode)
         @redis.set(key, game.id)
-        puts "Created new game with id #{game.id}"
+        puts "Created new game in channel #{@id} with id #{game.id}"
         game
       end
     end
