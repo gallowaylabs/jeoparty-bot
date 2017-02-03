@@ -24,12 +24,14 @@ module Jeoparty
     def new_game(mode)
       key = "channel:#{@id}:current_game"
       current = @redis.get(key)
-      if Game.get(@id, current).remaining_clue_count > 0
-        puts 'Game in progress'
+      game = Game.get(@id, current)
+      if game&.remaining_clue_count > 0
         nil
       else
+        game.cleanup
         game = Game.new_game(@id, mode)
         @redis.set(key, game.id)
+        @redis.sadd("channel:#{@id}:games", game.id)
         puts "Created new game in channel #{@id} with id #{game.id}"
         game
       end

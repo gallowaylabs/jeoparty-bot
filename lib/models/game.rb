@@ -70,12 +70,13 @@ module Jeoparty
     end
 
     def self._build_random_game(game)
-      uri = 'http://jservice.io/api/random?count=30'
-      request = HTTParty.get(uri)
-      response = JSON.parse(request.body)
+      uri = 'http://jservice.io/api/random'
 
-      response.each do |clue|
-        clue = _clean_clue(clue)
+      30.times do
+        request = HTTParty.get(uri)
+        response = JSON.parse(request.body)
+
+        clue = _clean_clue(response.first)
         unless clue.nil? || clue.empty?  # Don't add degenerate clues
           clue_key = "game_clue:#{game.id}:#{clue['id']}"
           game.redis.set(clue_key, clue.to_json)
@@ -197,6 +198,10 @@ module Jeoparty
       leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }
     end
 
+    def user_score(user_id)
+      User.get(user_id).score(@id)
+    end
+
     def moderator_update_score(user, timestamp, reset = false)
       key = "response:#{@id}:#{user}:#{timestamp}"
       response = @redis.hgetall(key)
@@ -238,7 +243,7 @@ module Jeoparty
       clue['answer'] = answer_sanitized.gsub(/\(.*\)/, '').gsub(/[^\/[[:alnum:]]\s\-]/i, '')
 
       # Skip clues with empty questions or answers or if they've been voted as invalid
-      if (!clue['answer'].nil? || !clue['question'].nil?) && clue['invalid_count'].nil?
+      if !clue['answer'].nil? && !clue['question'].nil? && clue['invalid_count'].nil?
         clue
       end
     end

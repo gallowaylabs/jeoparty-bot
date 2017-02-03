@@ -73,7 +73,7 @@ module Jeoparty
     end
 
     match /^show\s*(my)?\s*score\s*$/i do |client, data, match|
-      score = Channel.get(data.channel).game&.score
+      score = Channel.get(data.channel).game&.user_score(data.user)
       client.say(text: "<@#{data.user}>, your score is #{Util.format_currency(score)}", channel: data.channel)
     end
 
@@ -217,7 +217,11 @@ Source code available at: https://github.com/esbdotio/jeoparty-bot.
       desc 'The punniest trivia questions since 1978'
 
       command 'new game' do
-        desc 'Start a new game with the usual 6 categories of 5 questions each.'
+        desc 'Start a new game with the usual 6 categories of 5 clues each.'
+      end
+
+      command 'new random game' do
+        desc 'Start a new game with 30 totally random clues.'
       end
 
       command 'next' do
