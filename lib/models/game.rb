@@ -243,7 +243,7 @@ module Jeoparty
       clue['answer'] = answer_sanitized.gsub(/\(.*\)/, '').gsub(/[^\/[[:alnum:]]\s\-]/i, '')
 
       # Skip clues with empty questions or answers or if they've been voted as invalid
-      if !clue['answer'].nil? && !clue['question'].nil? && clue['invalid_count'].nil?
+      if !clue['answer'].nil? && !clue['question'].nil? && !clue['question'].empty? && clue['invalid_count'].nil?
         clue
       end
     end
