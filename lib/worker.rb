@@ -89,10 +89,10 @@ module Jeoparty
           game = Channel.get(data.channel).new_game(match[:mode])
 
           if game.categories.nil?
-            text = %Q{*Starting a new game* 30 random clues have been chosen
+            text = %Q{<!here> *Starting a new game* 30 random clues have been chosen
             \n Add :+1: or :-1: reactions to this post to keep or cancel this game mode}
           else
-            text = %Q{*Starting a new game!* The categories today are:\n• #{game.categories.join("\n• ")}
+            text = %Q{<!here> *Starting a new game!* The categories today are:\n• #{game.categories.join("\n• ")}
             \n\n Add :+1: or :-1: reactions to this post to keep or redo these categories}
           end
           # Yes, the unicode bullet point makes me sad as well
