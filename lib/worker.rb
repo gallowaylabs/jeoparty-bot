@@ -13,6 +13,7 @@ module Jeoparty
   class JeopartyBot < SlackRubyBot::Bot
     match /^next\s*($|answer|clue)/i do |client, data, match|
       game = Channel.get(data.channel).game
+      guesser = nil
 
       # Only post a question if none is in progress
       if !game.nil? && game.current_clue.nil?
@@ -26,32 +27,46 @@ module Jeoparty
                        channel: data.channel)
           end
         else
+          skip_wait = false
           # On to the next clue
-          air_date = Time.iso8601(clue['airdate']).to_i
+          if clue['daily_double']
+            client.say(text: %Q{*Daily Double!* The category is: \n>#{clue['category']['title']}\nYou have #{ENV['ANSWER_TIME_SECONDS'].to_i / 2} seconds to enter your bid of $100 to $1000 with `bid <amount>`},
+                       channel: data.channel)
 
-          client.web_client.chat_postMessage(
-              channel: data.channel,
-              as_user: true,
-              attachments: [
-                {
-                  fallback: "#{clue['category']['title']} for $#{clue['value']}: `#{clue['question']}`",
-                  title: "#{clue['category']['title']} for $#{clue['value']}",
-                  text: "#{clue['question']}",
-                  footer: "Clue #{clue['id']}",
-                  ts: "#{air_date}"
-                }
-              ]
-          )
+            EM.defer do
+              sleep ENV['ANSWER_TIME_SECONDS'].to_i / 2
+              guesser = game.pick_daily_double_user
+              if guesser.nil?
+                client.say(text: 'No bids? I do suppose that the only winning move is not to play', channel: data.channel)
+                game.clue_answered
+                skip_wait = true
+              else
+                client.say(text: ":game_die: <@#{guesser}>, you have been selected to answer this clue! Answers from other players will result in a penalty.",
+                           channel: data.channel)
+                bid = game.get_bid(guesser, clue['id'])
+                post_clue(clue, client, data.channel, value: bid)
+              end
+            end
+          else
+            post_clue(clue, client, data.channel)
+          end
 
-          EM.defer do
-            sleep ENV['ANSWER_TIME_SECONDS'].to_i
-            # Fetch the current clue. Show the answer if the current clue was the
-            # one that was asked ANSWER_TIME_SECONDS ago. This is to avoid the race condition
-            # where a clue is answered and a new one is requested in less than ANSWER_TIME_SECONDS
-            latest = game.current_clue
-            if !latest.nil? && latest['id'] == clue['id']
-              game.clue_answered
-              client.say(text: "Time is up! The answer was \n> #{clue['answer']}", channel: data.channel)
+          unless skip_wait
+            EM.defer do
+              sleep ENV['ANSWER_TIME_SECONDS'].to_i + (clue['daily_double']? ENV['ANSWER_TIME_SECONDS'].to_i / 2 : 0)
+              # Fetch the current clue. Show the answer if the current clue was the
+              # one that was asked ANSWER_TIME_SECONDS ago. This is to avoid the race condition
+              # where a clue is answered and a new one is requested in less than ANSWER_TIME_SECONDS
+              latest = game.current_clue
+              if !latest.nil? && latest['id'] == clue['id']
+                if latest['daily_double']
+                  verdict = game.attempt_answer(guesser, '', nil)
+                  client.say(text: "Time is up! <@#{guesser}> your score is now #{Util.format_currency(verdict[:score])}. The answer was \n> #{clue['answer']}", channel: data.channel)
+                else
+                  client.say(text: "Time is up! The answer was \n> #{clue['answer']}", channel: data.channel)
+                end
+                game.clue_answered
+              end
             end
           end
         end
@@ -61,16 +76,28 @@ module Jeoparty
     match /^(what|whats|where|wheres|who|whos|when|whens) /i do |client, data, match|
       verdict = Channel.get(data.channel).game&.attempt_answer(data.user, data.text, data.ts)
 
-      if verdict[:duplicate]
+      if verdict[:bad_sport]
+        client.say(text: "It isn't your daily double clue <@#{data.user}>! Your score is now #{Util.format_currency(verdict[:score])}", channel: data.channel)
+      elsif verdict[:duplicate]
         client.say(text: "Only one guess per clue is allowed <@#{data.user}>!", channel: data.channel)
       elsif verdict[:correct]
         client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{Util.format_currency(verdict[:score])}",
                    channel: data.channel)
       elsif !verdict[:clue_gone] && !verdict[:correct]
-        client.say(text: "Sorry <@#{data.user}>, that is incorrect. Your score is now #{Util.format_currency(verdict[:score])}",
-                   channel: data.channel)
+        text = "Sorry <@#{data.user}>, that is incorrect. Your score is now #{Util.format_currency(verdict[:score])}"
+        unless verdict[:show_answer].nil?
+          text += "\nThe correct answer was:\n>#{verdict[:show_answer]}"
+        end
+        client.say(text: text, channel: data.channel)
       end
     end
+
+    match /^(bid|bet) (?<bid>\d*)$/i do |client, data, match|
+      bid = [100, [1000, match[:bid].to_i].min].max
+      Channel.get(data.channel).game&.record_bid(data.user, bid)
+      client.say(text: "<@#{data.user}>, you have bid #{Util.format_currency(bid)}", channel: data.channel)
+    end
+
 
     match /^show\s*(my)?\s*score\s*$/i do |client, data, match|
       score = Channel.get(data.channel).game&.user_score(data.user)
@@ -265,6 +292,28 @@ Source code available at: https://github.com/esbdotio/jeoparty-bot.
         players << "#{i + 1}. #{name['real']}: #{Util.format_currency(user[:score])}"
       end
       players
+    end
+
+    def self.post_clue(clue, client, channel, value: nil)
+      air_date = Time.iso8601(clue['airdate']).to_i
+
+      if value.nil?
+        value = clue['value']
+      end
+
+      client.web_client.chat_postMessage(
+        channel: channel,
+        as_user: true,
+        attachments: [
+          {
+            fallback: "#{clue['category']['title']} for $#{value}: `#{clue['question']}`",
+            title: "#{clue['category']['title']} for $#{value}",
+            text: "#{clue['question']}",
+            footer: "Clue #{clue['id']}",
+            ts: "#{air_date}"
+          }
+        ]
+      )
     end
   end
 
