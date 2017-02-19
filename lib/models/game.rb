@@ -134,6 +134,31 @@ module Jeoparty
       end
     end
 
+    def record_bid(user, bid)
+      clue = current_clue
+      unless clue.nil? || clue['daily_double'].nil?
+        @redis.pipelined do
+          @redis.set("bid:#{@id}:#{clue['id']}:#{user}", bid, ex: ENV['ANSWER_TIME_SECONDS'].to_i * 3)
+          @redis.sadd("bid:#{@id}:#{clue['id']}", user)
+        end
+      end
+    end
+
+    def get_bid(user, clue_id)
+      @redis.get("bid:#{@id}:#{clue_id}:#{user}")
+    end
+
+    def pick_daily_double_user
+      clue = current_clue
+      user = @redis.srandmember("bid:#{@id}:#{clue['id']}")
+      @redis.set("dailydouble:#{@id}:#{clue['id']}:#{user}", '', ex: ENV['ANSWER_TIME_SECONDS'].to_i * 3)
+      user
+    end
+
+    def daily_double_user?(user, clue_id)
+      @redis.exists("dailydouble:#{@id}:#{clue_id}:#{user}")
+    end
+
     # Mark clue as answered
     def clue_answered
       @redis.del("game:#{@id}:current")
@@ -142,16 +167,28 @@ module Jeoparty
     # Attempt to answer the clue
     def attempt_answer(user, guess, timestamp)
       clue = current_clue
-      response = {duplicate: false, correct: false, clue_gone: clue.nil?, score: 0}
+      response = {duplicate: false, correct: false, bad_sport: false, show_answer: nil,
+                  clue_gone: clue.nil?, score: 0}
 
       unless clue.nil?
         valid_attempt = @redis.set("attempt:#{@id}:#{user}:#{clue['id']}", '',
-                                   ex: ENV['ANSWER_TIME_SECONDS'].to_i * 2, nx: true)
+                                   ex: ENV['ANSWER_TIME_SECONDS'].to_i * 3, nx: true)
         if valid_attempt
           response[:correct] = _is_correct?(clue, guess)
-          response[:score] = User.get(user).update_score(@id, @channel, clue['value'], response[:correct])
+          if clue['daily_double']
+            # Handle the case where someone is a bad sport and answers the daily double when it isn't their turn
+            unless daily_double_user?(user, clue['id'])
+              response[:correct] = false
+              response[:bad_sport] = true
+            end
+            value = get_bid(user, clue['id'])
+            response[:show_answer] = clue['answer']
+          else
+            value = clue['value']
+          end
+          response[:score] = User.get(user).update_score(@id, @channel, value, response[:correct])
 
-          if response[:correct]
+          if response[:correct] || (clue['daily_double'] && !response[:bad_sport])
             clue_answered
           end
           _record_answer(user, clue, response[:correct], timestamp)
@@ -221,7 +258,9 @@ module Jeoparty
     end
 
     def self._clean_clue(clue)
-      clue['value'] = 200 if clue['value'].nil?
+      if clue['value'].nil?
+        clue['daily_double'] = true
+      end
       answer_sanitized = Sanitize.fragment(clue['answer'].gsub(/\s+(&nbsp;|&)\s+/i, ' and '))
                            .gsub(/^(the|a|an) /i, '')
                            .strip
