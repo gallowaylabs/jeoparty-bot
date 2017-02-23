@@ -81,8 +81,11 @@ module Jeoparty
       elsif verdict[:duplicate]
         client.say(text: "Only one guess per clue is allowed <@#{data.user}>!", channel: data.channel)
       elsif verdict[:correct]
-        client.say(text: "That is the correct answer <@#{data.user}> :tada: Your score is now #{Util.format_currency(verdict[:score])}",
-                   channel: data.channel)
+        text = "That is the correct answer <@#{data.user}> :tada: Your score is now #{Util.format_currency(verdict[:score])}."
+        unless verdict[:show_answer].nil?
+          text += "\nThe exact answer was:\n>#{verdict[:show_answer]}"
+        end
+        client.say(text: text, channel: data.channel)
       elsif !verdict[:clue_gone] && !verdict[:correct]
         text = "Sorry <@#{data.user}>, that is incorrect. Your score is now #{Util.format_currency(verdict[:score])}"
         unless verdict[:show_answer].nil?
@@ -153,22 +156,28 @@ module Jeoparty
       end
     end
 
-    match /^show scoreboard/i do |client, data, match|
+    match /^show\s*(the)? top (?<count>\d*)\s*(players|scores)?/i do |client, data, match|
+      players = format_board(Channel.get(data.channel).leaderboard(match[:count].to_i))
+      client.say(text: "The top #{match[:count]} players across all games are:\n> #{players.join("\n>")}",
+                 channel: data.channel)
+    end
+
+    match /^show\s*(the)? scoreboard/i do |client, data, match|
       players = format_board(Channel.get(data.channel).game&.scoreboard)
       unless players.empty?
         client.say(text: "The scores for this game are:\n> #{players.join("\n>")}", channel: data.channel)
       end
     end
 
-    match /^show leaderboard/i do |client, data, match|
-      players = format_board(Channel.get(data.channel).leaderboard)
-      client.say(text: "The highest scoring players across all games are\n> #{players.join("\n>")}",
+    match /^show\s*(the)? leaderboard/i do |client, data, match|
+      players = format_board(Channel.get(data.channel).leaderboard(10))
+      client.say(text: "The highest scoring players across all games are:\n> #{players.join("\n>")}",
                  channel: data.channel)
     end
 
-    match /^show loserboard/i do |client, data, match|
-      players = format_board(Channel.get(data.channel).leaderboard(true))
-      client.say(text: "The lowest scoring players across all games are\n> #{players.join("\n>")}",
+    match /^show\s*(the)? loserboard/i do |client, data, match|
+      players = format_board(Channel.get(data.channel).leaderboard(10, true))
+      client.say(text: "The lowest scoring players across all games are:\n> #{players.join("\n>")}",
                  channel: data.channel)
     end
 
@@ -271,6 +280,9 @@ Source code available at: https://github.com/esbdotio/jeoparty-bot.
         desc 'Shows all players scores in the current game'
       end
 
+      command 'show top (number) players' do
+        desc 'Shows the top (number) of players across all games'
+      end
       command 'show leaderboard' do
         desc 'Shows the top 10 players across all games'
       end

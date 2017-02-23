@@ -37,14 +37,13 @@ module Jeoparty
       end
     end
 
-    def leaderboard(bottom = false)
+    def leaderboard(count, bottom = false)
       leaders = []
       @redis.scan_each(:match => "score:#{@id}:*"){ |key| user_id = key.gsub("score:#{@id}:", ''); leaders << { :user_id => user_id, :score => User.get(user_id).historic_score(@id) } }
-      puts "[LOG] Leaderboard: #{leaders.to_s}"
       if bottom
-        leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.reverse.take(10)
+        leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.reverse.take(count)
       else
-        leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.take(10)
+        leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.take(count)
       end
     end
   end
