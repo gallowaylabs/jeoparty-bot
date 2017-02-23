@@ -174,7 +174,13 @@ module Jeoparty
         valid_attempt = @redis.set("attempt:#{@id}:#{user}:#{clue['id']}", '',
                                    ex: ENV['ANSWER_TIME_SECONDS'].to_i * 3, nx: true)
         if valid_attempt
-          response[:correct] = _is_correct?(clue, guess)
+          correctness = _is_correct?(clue, guess)
+          response[:correct] = correctness[:correct]
+          # Show the answer if the user was close but not exact.
+          if correctness[:close] && !correctness[:exact]
+            response[:show_answer] = clue['answer']
+          end
+
           if clue['daily_double']
             # Handle the case where someone is a bad sport and answers the daily double when it isn't their turn
             unless daily_double_user?(user, clue['id'])
@@ -220,8 +226,11 @@ module Jeoparty
 
       puts "[LOG] User answer: #{response} | Correct answer (#{similarity}): #{clue['answer']} | Alternate answer (#{alt_similarity}): #{clue['alternate']}"
 
-      clue['answer'] == response || clue['alternate'] == response ||
-        similarity >= ENV['SIMILARITY_THRESHOLD'].to_f || alt_similarity >= ENV['SIMILARITY_THRESHOLD'].to_f
+      response = {}
+      response[:exact] = clue['answer'] == response || clue['alternate'] == response || similarity == 1.0 || alt_similarity == 1.0
+      response[:close] = similarity >= ENV['SIMILARITY_THRESHOLD'].to_f || alt_similarity >= ENV['SIMILARITY_THRESHOLD'].to_f
+      response[:correct] = response[:exact] || response[:close]
+      response
     end
 
     def remaining_clue_count
@@ -263,6 +272,7 @@ module Jeoparty
       end
       answer_sanitized = Sanitize.fragment(clue['answer'].gsub(/\s+(&nbsp;|&)\s+/i, ' and '))
                            .gsub(/^(the|a|an) /i, '')
+                           .gsub('=', '')
                            .strip
                            .downcase
 
