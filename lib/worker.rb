@@ -101,7 +101,6 @@ module Jeoparty
       client.say(text: "<@#{data.user}>, you have bid #{Util.format_currency(bid)}", channel: data.channel)
     end
 
-
     match /^show\s*(my)?\s*score\s*$/i do |client, data, match|
       score = Channel.get(data.channel).game&.user_score(data.user)
       client.say(text: "<@#{data.user}>, your score is #{Util.format_currency(score)}", channel: data.channel)
@@ -158,7 +157,7 @@ module Jeoparty
 
     match /^show\s*(the)? top (?<count>\d*)\s*(players|scores)?/i do |client, data, match|
       players = format_board(Channel.get(data.channel).leaderboard(match[:count].to_i))
-      client.say(text: "The top #{match[:count]} players across all games are:\n> #{players.join("\n>")}",
+      client.say(text: "The top #{match[:count]} players across all games this month are:\n> #{players.join("\n>")}",
                  channel: data.channel)
     end
 
@@ -171,13 +170,13 @@ module Jeoparty
 
     match /^show\s*(the)? leaderboard/i do |client, data, match|
       players = format_board(Channel.get(data.channel).leaderboard(10))
-      client.say(text: "The highest scoring players across all games are:\n> #{players.join("\n>")}",
+      client.say(text: "The highest scoring players across all games this month are:\n> #{players.join("\n>")}",
                  channel: data.channel)
     end
 
     match /^show\s*(the)? loserboard/i do |client, data, match|
       players = format_board(Channel.get(data.channel).leaderboard(10, true))
-      client.say(text: "The lowest scoring players across all games are:\n> #{players.join("\n>")}",
+      client.say(text: "The lowest scoring players across all games this month are:\n> #{players.join("\n>")}",
                  channel: data.channel)
     end
 
@@ -208,6 +207,12 @@ module Jeoparty
       if User.get(data.user).is_global_moderator?
         Admin.sleep!
         client.say(text:"Going to sleep :sleeping:. Wake me up with `<@#{client.self.id}> wake`", channel: data.channel)
+      end
+    end
+
+    command 'assume moderator role' do |client, data, match|
+      if Channel.get(data.channel).assume_moderator(data.user)
+        client.say(text:"<@#{data.user}> is now a moderator in this channel", channel: data.channel)
       end
     end
 

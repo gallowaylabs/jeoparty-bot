@@ -194,7 +194,7 @@ module Jeoparty
           else
             value = clue['value']
           end
-          response[:score] = User.get(user).update_score(@id, @channel, value, response[:correct])
+          response[:score] = update_score(user, value, response[:correct])
 
           if response[:correct] || (clue['daily_double'] && !response[:bad_sport])
             clue_answered
@@ -241,13 +241,23 @@ module Jeoparty
 
     def scoreboard
       leaders = []
-      @redis.scan_each(:match => "game_score:#{@id}:*"){ |key| user_id = key.gsub("game_score:#{@id}:", ''); leaders << { :user_id => user_id, :score => User.get(user_id).score(@id) } }
-      puts "[LOG] Scoreboard: #{leaders.to_s}"
-      leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }
+      scores = @redis.hgetall("game_score:#{@id}")
+      unless scores.nil?
+        scores.each {|k,v| leaders << {user_id: k, score: v}}
+        leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }
+      end
     end
 
-    def user_score(user_id)
-      User.get(user_id).score(@id)
+    def user_score(user)
+      score = @redis.hmget("game_score:#{@id}", user)
+      unless score.nil?
+        score.first
+      end
+    end
+
+    def update_score(user, amount, correct)
+      @redis.sadd("game_players:#{@id}", user)
+      @redis.hincrby("game_score:#{@id}", user, correct ? amount : amount * -1)
     end
 
     def moderator_update_score(user, timestamp, reset = false)
@@ -257,7 +267,7 @@ module Jeoparty
         # correct != true because we want correct answers to be subtracted from and incorrect to be added to
         value = reset ? response['value'].to_i : response['value'].to_i * 2
         @redis.del(key) # Avoid double score modifications
-        User.get(user).update_score(@id, @channel, value, response['correct'] != 'true')
+        update_score(user, value, response['correct'] != 'true')
       end
     end
 
