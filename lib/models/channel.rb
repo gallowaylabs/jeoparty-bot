@@ -46,5 +46,13 @@ module Jeoparty
         leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.take(count)
       end
     end
+
+    def is_user_moderator?(user)
+      @redis.sismember('global_moderators', user) || @redis.sismember("moderators:#{@id}", user)
+    end
+
+    def make_moderator(user)
+      @redis.sadd("moderators:#{@id}", user)
+    end
   end
 end

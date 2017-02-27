@@ -149,9 +149,11 @@ module Jeoparty
     end
 
     def pick_daily_double_user
+      bid_pool_key = "bid:#{@id}:#{clue['id']}"
       clue = current_clue
-      user = @redis.srandmember("bid:#{@id}:#{clue['id']}")
+      user = @redis.srandmember(bid_pool_key)
       @redis.set("dailydouble:#{@id}:#{clue['id']}:#{user}", '', ex: ENV['ANSWER_TIME_SECONDS'].to_i * 3)
+      @redis.del(bid_pool_key)
       user
     end
 
