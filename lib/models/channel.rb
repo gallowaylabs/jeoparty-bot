@@ -38,12 +38,48 @@ module Jeoparty
     end
 
     def leaderboard(count, bottom = false)
+      now = Date.today
+      first_date = Date.new(now.year, now.month, 1).to_time.to_f
+      scores = {}
+
+      games = @redis.smembers("channel:#{@id}:games")
+      filtered = games.select { |k| k.to_f > first_date }
+      filtered.each do |id|
+        game_scores = @redis.hgetall("game_score:#{id}")
+        game_scores.each do |k, v|
+          if scores[k].nil?
+            scores[k] = v.to_i
+          else
+            scores[k] += v.to_i
+          end
+        end
+      end
+
       leaders = []
-      @redis.scan_each(:match => "score:#{@id}:*"){ |key| user_id = key.gsub("score:#{@id}:", ''); leaders << { :user_id => user_id, :score => User.get(user_id).historic_score(@id) } }
+      scores.each {|k,v| leaders << {user_id: k, score: v}}
       if bottom
         leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.reverse.take(count)
       else
         leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }.take(count)
+      end
+    end
+
+    def is_user_moderator?(user)
+      @redis.sismember('global_moderators', user) || @redis.sismember("moderators:#{@id}", user)
+    end
+
+    def make_moderator(user)
+      @redis.sadd("moderators:#{@id}", user)
+    end
+
+    def remove_moderator(user)
+      @redis.srem("moderators:#{@id}", user)
+    end
+
+    def assume_moderator(user)
+      if @redis.scard("moderators:#{@id}") == 0
+        @redis.sadd("moderators:#{@id}", user)
+        true
       end
     end
   end

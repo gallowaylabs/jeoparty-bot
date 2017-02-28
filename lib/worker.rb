@@ -101,7 +101,6 @@ module Jeoparty
       client.say(text: "<@#{data.user}>, you have bid #{Util.format_currency(bid)}", channel: data.channel)
     end
 
-
     match /^show\s*(my)?\s*score\s*$/i do |client, data, match|
       score = Channel.get(data.channel).game&.user_score(data.user)
       client.say(text: "<@#{data.user}>, your score is #{Util.format_currency(score)}", channel: data.channel)
@@ -139,7 +138,7 @@ module Jeoparty
     end
 
     match /^skip\s?(clue)?/i do |client, data, match|
-      if User.get(data.user).is_moderator?
+      if Channel.get(data.channel).is_user_moderator?(data.user)
         game = Channel.get(data.channel).game
         unless game.nil?
           clue = game.current_clue
@@ -158,7 +157,7 @@ module Jeoparty
 
     match /^show\s*(the)? top (?<count>\d*)\s*(players|scores)?/i do |client, data, match|
       players = format_board(Channel.get(data.channel).leaderboard(match[:count].to_i))
-      client.say(text: "The top #{match[:count]} players across all games are:\n> #{players.join("\n>")}",
+      client.say(text: "The top #{match[:count]} players across all games this month are:\n> #{players.join("\n>")}",
                  channel: data.channel)
     end
 
@@ -171,18 +170,18 @@ module Jeoparty
 
     match /^show\s*(the)? leaderboard/i do |client, data, match|
       players = format_board(Channel.get(data.channel).leaderboard(10))
-      client.say(text: "The highest scoring players across all games are:\n> #{players.join("\n>")}",
+      client.say(text: "The highest scoring players across all games this month are:\n> #{players.join("\n>")}",
                  channel: data.channel)
     end
 
     match /^show\s*(the)? loserboard/i do |client, data, match|
       players = format_board(Channel.get(data.channel).leaderboard(10, true))
-      client.say(text: "The lowest scoring players across all games are:\n> #{players.join("\n>")}",
+      client.say(text: "The lowest scoring players across all games this month are:\n> #{players.join("\n>")}",
                  channel: data.channel)
     end
 
     match /^judges adjust \<@(?<user>[\w\d]*)\>\s* (?<value>[-\d]*)/i do |client, data, match|
-      if !match[:value].nil? && !match[:user].nil? && User.get(data.user).is_moderator?
+      if !match[:value].nil? && !match[:user].nil? && Channel.get(data.channel).is_user_moderator?(data.user)
         game = Channel.get(data.channel).game
         new_score = User.get(match[:user]).update_score(game.id, data.channel, match[:value])
         client.say(text: "<@#{match[:user]}>, your score is now #{Util.format_currency(new_score)}",
@@ -191,28 +190,27 @@ module Jeoparty
     end
 
     command 'cancel game' do |client, data, match|
-      if User.get(data.user).is_moderator?
+      if Channel.get(data.channel).is_user_moderator?(data.user)
         Channel.get(data.channel).game&.cleanup
         client.say(text:'Game cancelled', channel: data.channel)
       end
     end
 
-    command 'flush database' do |client, data, match|
-      if User.get(data.user).is_global_moderator?
-        Admin.flush!
-        client.say(text:'Database flushed.', channel: data.channel)
-      end
-    end
-
     command 'sleep' do |client, data, match|
-      if User.get(data.user).is_moderator?
+      if User.get(data.user).is_global_moderator?
         Admin.sleep!
         client.say(text:"Going to sleep :sleeping:. Wake me up with `<@#{client.self.id}> wake`", channel: data.channel)
       end
     end
 
+    command 'assume moderator role' do |client, data, match|
+      if Channel.get(data.channel).assume_moderator(data.user)
+        client.say(text:"<@#{data.user}> is now a moderator in this channel", channel: data.channel)
+      end
+    end
+
     command 'wake' do |client, data, match|
-      if User.get(data.user).is_moderator?
+      if User.get(data.user).is_global_moderator?
         Admin.wake!
         client.say(text:':sunny: Ready for a game? Type `new game`!', channel: data.channel)
       end
@@ -220,16 +218,23 @@ module Jeoparty
 
     match /^use token (?<token>[\w\d]*)\s*/i do |client, data, match|
       if !match[:token].nil? && match[:token] == ENV['GLOBAL_MOD_TOKEN']
-        User.get(data.user).make_moderator(:global)
+        User.get(data.user).make_global_moderator
         client.say(text: 'You are now a global moderator. Add other moderators with `add moderator @name`',
                    channel: data.channel)
       end
     end
 
     match /^add moderator \<@(?<user>[\w\d]*)\>\s*/i do |client, data, match|
-      if User.get(data.user).is_global_moderator? && !match[:user].nil?
-        User.get(match[:user]).make_moderator
-        client.say(text: "<@#{match[:user]}> is now a moderator", channel: data.channel)
+      if Channel.get(data.channel).is_user_moderator?(data.user) && !match[:user].nil?
+        Channel.get(data.channel).make_moderator(match[:user])
+        client.say(text: "<@#{match[:user]}> is now a moderator in this channel", channel: data.channel)
+      end
+    end
+
+    match /^remove moderator \<@(?<user>[\w\d]*)\>\s*/i do |client, data, match|
+      if Channel.get(data.channel).is_user_moderator?(data.user) && !match[:user].nil?
+        Channel.get(data.channel).remove_moderator(match[:user])
+        client.say(text: "<@#{match[:user]}> is no longer a moderator in this channel", channel: data.channel)
       end
     end
 
@@ -283,6 +288,7 @@ Source code available at: https://github.com/esbdotio/jeoparty-bot.
       command 'show top (number) players' do
         desc 'Shows the top (number) of players across all games'
       end
+
       command 'show leaderboard' do
         desc 'Shows the top 10 players across all games'
       end

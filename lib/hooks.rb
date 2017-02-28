@@ -12,7 +12,7 @@ module Jeoparty
         unless game.nil?
           emoji = Util.base_emoji(data['reaction'])
           adjust_emoji = %w(white_check_mark negative_squared_cross_mark)
-          if adjust_emoji.include?(emoji) && User.get(data['user']).is_moderator?
+          if adjust_emoji.include?(emoji) && Channel.get(data['item']['channel']).is_user_moderator?(data['user'])
             new_score = game.moderator_update_score(data['item_user'], data['item']['ts'])
             unless new_score.nil?
               client.say(text: "<@#{data['item_user']}>, the judges have reviewed your answer. Your score is now #{Util.format_currency(new_score)}",
