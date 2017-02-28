@@ -279,6 +279,7 @@ module Jeoparty
     end
 
     def self._clean_clue(clue)
+      clue['question'] = clue['question'].gsub('=', '')
       if clue['value'].nil?
         clue['daily_double'] = true
       end

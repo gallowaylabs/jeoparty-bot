@@ -196,13 +196,6 @@ module Jeoparty
       end
     end
 
-    command 'flush database' do |client, data, match|
-      if User.get(data.user).is_global_moderator?
-        Admin.flush!
-        client.say(text:'Database flushed.', channel: data.channel)
-      end
-    end
-
     command 'sleep' do |client, data, match|
       if User.get(data.user).is_global_moderator?
         Admin.sleep!
@@ -235,6 +228,13 @@ module Jeoparty
       if Channel.get(data.channel).is_user_moderator?(data.user) && !match[:user].nil?
         Channel.get(data.channel).make_moderator(match[:user])
         client.say(text: "<@#{match[:user]}> is now a moderator in this channel", channel: data.channel)
+      end
+    end
+
+    match /^remove moderator \<@(?<user>[\w\d]*)\>\s*/i do |client, data, match|
+      if Channel.get(data.channel).is_user_moderator?(data.user) && !match[:user].nil?
+        Channel.get(data.channel).remove_moderator(match[:user])
+        client.say(text: "<@#{match[:user]}> is no longer a moderator in this channel", channel: data.channel)
       end
     end
 
@@ -288,6 +288,7 @@ Source code available at: https://github.com/esbdotio/jeoparty-bot.
       command 'show top (number) players' do
         desc 'Shows the top (number) of players across all games'
       end
+
       command 'show leaderboard' do
         desc 'Shows the top 10 players across all games'
       end

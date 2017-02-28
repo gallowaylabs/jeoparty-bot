@@ -72,6 +72,10 @@ module Jeoparty
       @redis.sadd("moderators:#{@id}", user)
     end
 
+    def remove_moderator(user)
+      @redis.srem("moderators:#{@id}", user)
+    end
+
     def assume_moderator(user)
       if @redis.scard("moderators:#{@id}") == 0
         @redis.sadd("moderators:#{@id}", user)
