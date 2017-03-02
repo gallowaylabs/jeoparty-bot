@@ -29,7 +29,7 @@ module Jeoparty
         else
           skip_wait = false
           # On to the next clue
-          if not clue['daily_double']
+          if clue['daily_double']
             client.say(text: %Q{*Daily Double!* The category is: \n>#{clue['category']['title']}\nYou have #{ENV['ANSWER_TIME_SECONDS'].to_i / 2} seconds to enter your bid of $100 to $1000 with `bid <amount>`},
                        channel: data.channel)
             players = format_board(game.scoreboard)
