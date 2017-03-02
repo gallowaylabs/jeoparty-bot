@@ -29,9 +29,13 @@ module Jeoparty
         else
           skip_wait = false
           # On to the next clue
-          if clue['daily_double']
+          if not clue['daily_double']
             client.say(text: %Q{*Daily Double!* The category is: \n>#{clue['category']['title']}\nYou have #{ENV['ANSWER_TIME_SECONDS'].to_i / 2} seconds to enter your bid of $100 to $1000 with `bid <amount>`},
                        channel: data.channel)
+            players = format_board(game.scoreboard)
+            unless players.empty?
+              client.say(text: "As a reminder, the scores for this game are:\n> #{players.join("\n>")}", channel: data.channel)
+            end
 
             EM.defer do
               sleep ENV['ANSWER_TIME_SECONDS'].to_i / 2
@@ -182,8 +186,7 @@ module Jeoparty
 
     match /^judges adjust \<@(?<user>[\w\d]*)\>\s* (?<value>[-\d]*)/i do |client, data, match|
       if !match[:value].nil? && !match[:user].nil? && Channel.get(data.channel).is_user_moderator?(data.user)
-        game = Channel.get(data.channel).game
-        new_score = User.get(match[:user]).update_score(game.id, data.channel, match[:value])
+        new_score = Channel.get(data.channel).game&.update_score(match[:user], match[:value], true)
         client.say(text: "<@#{match[:user]}>, your score is now #{Util.format_currency(new_score)}",
                    channel: data.channel)
       end
@@ -244,6 +247,7 @@ Questions provided by jService: http://jservice.io/ \n
 Powered by slack-ruby-bot: https://github.com/slack-ruby/slack-ruby-bot \n
 Source code available at: https://github.com/esbdotio/jeoparty-bot.
       }
+      puts data
       client.say(text: about, channel: data.channel)
     end
 
