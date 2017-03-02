@@ -149,8 +149,8 @@ module Jeoparty
     end
 
     def pick_daily_double_user
-      bid_pool_key = "bid:#{@id}:#{clue['id']}"
       clue = current_clue
+      bid_pool_key = "bid:#{@id}:#{clue['id']}"
       user = @redis.srandmember(bid_pool_key)
       @redis.set("dailydouble:#{@id}:#{clue['id']}:#{user}", '', ex: ENV['ANSWER_TIME_SECONDS'].to_i * 3)
       @redis.del(bid_pool_key)
@@ -243,7 +243,7 @@ module Jeoparty
       leaders = []
       scores = @redis.hgetall("game_score:#{@id}")
       unless scores.nil?
-        scores.each {|k,v| leaders << {user_id: k, score: v}}
+        scores.each {|k,v| leaders << {user_id: k, score: v.to_i}}
         leaders.uniq{ |l| l[:user_id] }.sort{ |a, b| b[:score] <=> a[:score] }
       end
     end

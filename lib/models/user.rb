@@ -37,8 +37,11 @@ module Jeoparty
         name = { 'id' => user['id'], 'name' => user['name']}
         unless user['profile'].nil?
           name['real'] = user['profile']['real_name'] unless user['profile']['real_name'].nil? || user['profile']['real_name'] == ''
-          name['first'] = user['profile']['first_name'] unless user['profile']['first_name'].nil? || user['profile']['first_name'] == ''
-          name['first'] = user['profile']['last_name'] unless user['profile']['last_name'].nil? || user['profile']['last_name'] == ''
+        end
+
+        # Fallback for users without real names (usually bots or guests)
+        if name['real'].nil? || name['real'].empty?
+          name['real'] = user['name']
         end
         @redis.pipelined do
           @redis.mapped_hmset("user:#{name['id']}", name)
