@@ -30,7 +30,7 @@ module Jeoparty
           skip_wait = false
           # On to the next clue
           if clue['daily_double']
-            client.say(text: %Q{*Daily Double!* The category is: \n>#{clue['category']['title']}\nYou have #{ENV['ANSWER_TIME_SECONDS'].to_i / 2} seconds to enter your bid of $100 to $1000 with `bid <amount>`},
+            client.say(text: %Q{*Daily Double!* The category is: \n>#{clue['category']['title']}\nYou have #{ENV['ANSWER_TIME_SECONDS'].to_i / 2} seconds to enter your bid of 100 to max(your score, 1000) with `bid <amount>`},
                        channel: data.channel)
             players = format_board(game.scoreboard)
             unless players.empty?
@@ -99,9 +99,13 @@ module Jeoparty
       end
     end
 
-    match /^(bid|bet) (?<bid>\d*)$/i do |client, data, match|
-      bid = [100, [1000, match[:bid].to_i].min].max
-      Channel.get(data.channel).game&.record_bid(data.user, bid)
+    match /^(bid|bet) \$?(?<bid>\d*|true)$/i do |client, data, match|
+      entered_bid = match[:bid]
+      if entered_bid.upcase == 'TRUE'
+        # Max int value. The record_bid function will adjust this to the user's score as appropriate
+        entered_bid = 4611686018427387903
+      end
+      bid = Channel.get(data.channel).game&.record_bid(data.user,  entered_bid.to_i)
       client.say(text: "<@#{data.user}>, you have bid #{Util.format_currency(bid)}", channel: data.channel)
     end
 
