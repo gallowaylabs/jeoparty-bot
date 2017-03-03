@@ -137,15 +137,18 @@ module Jeoparty
     def record_bid(user, bid)
       clue = current_clue
       unless clue.nil? || clue['daily_double'].nil?
+        user_score = user_score(user)
+        bid = [100, [[1000, user_score.to_i].max, bid].min].max
         @redis.pipelined do
           @redis.set("bid:#{@id}:#{clue['id']}:#{user}", bid, ex: ENV['ANSWER_TIME_SECONDS'].to_i * 3)
           @redis.sadd("bid:#{@id}:#{clue['id']}", user)
         end
+        bid
       end
     end
 
     def get_bid(user, clue_id)
-      @redis.get("bid:#{@id}:#{clue_id}:#{user}")
+      @redis.get("bid:#{@id}:#{clue_id}:#{user}").to_i
     end
 
     def pick_daily_double_user
