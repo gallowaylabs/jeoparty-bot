@@ -267,16 +267,17 @@ module Jeoparty
       response_key = "response:#{@id}:#{user}:#{timestamp}"
       response = @redis.hgetall(response_key)
       unless response.nil? or response.empty?
-        # correct != true because we want correct answers to be subtracted from and incorrect to be added to
         value = reset ? response['value'].to_i : response['value'].to_i * 2
+        # correct != true because we want correct answers to be subtracted from and incorrect to be added to
+        delta = response['correct'] == 'true' ? value * -1 : value
         @redis.del(response_key) # Avoid double score modifications
 
         updated = []
-        new_score = update_score(user, value, response['correct'] != 'true')
-        updated << {user: user, score: new_score, delta: value}
+        new_score = update_score(user, delta, true)
+        updated << {user: user, score: new_score, delta: delta}
 
         @redis.scan_each(:match => "response:#{@id}:*"){ |key| updated << _reset_subsequent_answers(key, response['clue_id'], timestamp) }
-        updated
+        updated.compact
       end
     end
 

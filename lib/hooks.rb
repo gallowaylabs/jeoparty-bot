@@ -16,9 +16,12 @@ module Jeoparty
             updated_users = game.moderator_update_score(data['item_user'], data['item']['ts'])
             unless updated_users.nil? or updated_users.empty?
               first = updated_users.first
-              message = "<@#{first[:user]}>, the judges have reviewed your answer and found that you were "\
-                        "#{first[:delta] > 0 ? 'correct' : 'incorrect'}. Subsequent answers by other players were "\
-                        "also adjusted. The new scores are:\n>#{format_adjusted(updated_users).join("\n>")} "
+              message = "<@#{first[:user]}>, the judges have reviewed your answer and found that you were #{first[:delta] > 0 ? 'correct' : 'incorrect'}. "
+              if updated_users.length > 1
+                message += "Subsequent answers by other players were also adjusted. The new scores are:\n>#{format_adjusted(updated_users).join("\n>")} "
+              else
+                message += "Your score is now #{Util.format_currency(first[:score])}."
+              end
               client.say(text: message, channel: data['item']['channel'])
             end
           end
@@ -37,9 +40,7 @@ module Jeoparty
       def format_adjusted(updated_users)
         players = []
         updated_users.each do |updated|
-          unless updated.nil?
-            players << "<@#{updated[:user]}>: #{Util.format_currency(updated[:score])}"
-          end
+          players << "<@#{updated[:user]}>: #{Util.format_currency(updated[:score])}"
         end
         players
       end
