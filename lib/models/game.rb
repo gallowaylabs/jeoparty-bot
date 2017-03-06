@@ -202,7 +202,7 @@ module Jeoparty
           if response[:correct] || (clue['daily_double'] && !response[:bad_sport])
             clue_answered
           end
-          _record_answer(user, clue, response[:correct], timestamp)
+          _record_answer(user, clue['id'], value, response[:correct], timestamp)
         else
           response[:duplicate] = true
         end
@@ -264,13 +264,31 @@ module Jeoparty
     end
 
     def moderator_update_score(user, timestamp, reset = false)
-      key = "response:#{@id}:#{user}:#{timestamp}"
-      response = @redis.hgetall(key)
+      response_key = "response:#{@id}:#{user}:#{timestamp}"
+      response = @redis.hgetall(response_key)
       unless response.nil? or response.empty?
-        # correct != true because we want correct answers to be subtracted from and incorrect to be added to
         value = reset ? response['value'].to_i : response['value'].to_i * 2
-        @redis.del(key) # Avoid double score modifications
-        update_score(user, value, response['correct'] != 'true')
+        # correct != true because we want correct answers to be subtracted from and incorrect to be added to
+        delta = response['correct'] == 'true' ? value * -1 : value
+        @redis.del(response_key) # Avoid double score modifications
+
+        updated = []
+        new_score = update_score(user, delta, true)
+        updated << {user: user, score: new_score, delta: delta}
+
+        @redis.scan_each(:match => "response:#{@id}:*"){ |key| updated << _reset_subsequent_answers(key, response['clue_id'], timestamp) }
+        updated.compact
+      end
+    end
+
+    def _reset_subsequent_answers(key, clue_id, after_ts)
+      response = @redis.hgetall(key)
+      unless response.nil? || response.empty?
+        if response['clue_id'] == clue_id and response['ts'].to_f > after_ts.to_f
+          result = {user: response['user'], delta: response['value'].to_i}
+          result[:score] = update_score(result[:user], result[:delta], true)
+          result
+        end
       end
     end
 
@@ -313,11 +331,12 @@ module Jeoparty
       end
     end
 
-    def _record_answer(user, clue, correct, timestamp)
+    def _record_answer(user, clue_id, value, correct, timestamp)
       key = "response:#{@id}:#{user}:#{timestamp}"
       @redis.pipelined do
-        @redis.hmset(key, 'clue_id', clue['id'], 'value', clue['value'], 'correct', correct)
-        @redis.expire(key, 600) # 10 minute review time
+        @redis.hmset(key, 'clue_id', clue_id, 'value', value,
+                     'correct', correct, 'ts', timestamp, 'user', user)
+        @redis.expire(key, 300) # 5 minute review time
       end
     end
   end

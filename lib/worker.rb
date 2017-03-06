@@ -106,7 +106,9 @@ module Jeoparty
         entered_bid = 4611686018427387903
       end
       bid = Channel.get(data.channel).game&.record_bid(data.user,  entered_bid.to_i)
-      client.say(text: "<@#{data.user}>, you have bid #{Util.format_currency(bid)}", channel: data.channel)
+      unless bid.nil?
+        client.say(text: "<@#{data.user}>, you have bid #{Util.format_currency(bid)}", channel: data.channel)
+      end
     end
 
     match /^show\s*(my)?\s*score\s*$/i do |client, data, match|

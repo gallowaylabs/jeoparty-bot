@@ -13,10 +13,16 @@ module Jeoparty
           emoji = Util.base_emoji(data['reaction'])
           adjust_emoji = %w(white_check_mark negative_squared_cross_mark)
           if adjust_emoji.include?(emoji) && Channel.get(data['item']['channel']).is_user_moderator?(data['user'])
-            new_score = game.moderator_update_score(data['item_user'], data['item']['ts'])
-            unless new_score.nil?
-              client.say(text: "<@#{data['item_user']}>, the judges have reviewed your answer. Your score is now #{Util.format_currency(new_score)}",
-                         channel: data['item']['channel'])
+            updated_users = game.moderator_update_score(data['item_user'], data['item']['ts'])
+            unless updated_users.nil? or updated_users.empty?
+              first = updated_users.first
+              message = "<@#{first[:user]}>, the judges have reviewed your answer and found that you were #{first[:delta] > 0 ? 'correct' : 'incorrect'}. "
+              if updated_users.length > 1
+                message += "Subsequent answers by other players were also adjusted. The new scores are:\n>#{format_adjusted(updated_users).join("\n>")} "
+              else
+                message += "Your score is now #{Util.format_currency(first[:score])}."
+              end
+              client.say(text: message, channel: data['item']['channel'])
             end
           end
 
@@ -29,6 +35,14 @@ module Jeoparty
             end
           end
         end
+      end
+
+      def format_adjusted(updated_users)
+        players = []
+        updated_users.each do |updated|
+          players << "<@#{updated[:user]}>: #{Util.format_currency(updated[:score])}"
+        end
+        players
       end
     end
   end
