@@ -194,6 +194,9 @@ module Jeoparty
             end
             value = get_bid(user, clue['id'])
             response[:show_answer] = clue['answer']
+            unless clue['alternate'].nil?
+              response[:show_answer] += " (#{clue['alternate']})"
+            end
           else
             value = clue['value']
           end
@@ -286,7 +289,7 @@ module Jeoparty
       unless response.nil? || response.empty?
         if response['clue_id'] == clue_id and response['ts'].to_f > after_ts.to_f
           result = {user: response['user'], delta: response['value'].to_i}
-          result[:score] = update_score(result[:user], result[:delta], true)
+          result[:score] = update_score(result[:user], result[:delta], response['correct'] != 'true')
           result
         end
       end

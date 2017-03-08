@@ -99,9 +99,9 @@ module Jeoparty
       end
     end
 
-    match /^(bid|bet) \$?(?<bid>\d*|true)$/i do |client, data, match|
+    match /^(bid|bet) \$?(?<bid>\d*|true|max|all)$/i do |client, data, match|
       entered_bid = match[:bid]
-      if entered_bid.upcase == 'TRUE'
+      if %w(TRUE MAX ALL).include?(entered_bid.upcase)
         # Max int value. The record_bid function will adjust this to the user's score as appropriate
         entered_bid = 4611686018427387903
       end
