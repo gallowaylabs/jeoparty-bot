@@ -184,6 +184,9 @@ module Jeoparty
           # Show the answer if the user was close but not exact.
           if correctness[:close] && !correctness[:exact]
             response[:show_answer] = clue['answer']
+            unless clue['alternate'].nil?
+              response[:show_answer] += " (#{clue['alternate']})"
+            end
           end
 
           if clue['daily_double']
@@ -194,9 +197,6 @@ module Jeoparty
             end
             value = get_bid(user, clue['id'])
             response[:show_answer] = clue['answer']
-            unless clue['alternate'].nil?
-              response[:show_answer] += " (#{clue['alternate']})"
-            end
           else
             value = clue['value']
           end
@@ -213,8 +213,8 @@ module Jeoparty
       response
     end
 
-    def _is_correct?(clue, response)
-      response = response
+    def _is_correct?(clue, user_response)
+      user_response = user_response
                    .gsub(/\s+(&nbsp;|&)\s+/i, ' and ')
                    .gsub(/[^\w\s]/i, '')
                    .gsub(/^(what|whats|where|wheres|who|whos) /i, '')
@@ -225,20 +225,21 @@ module Jeoparty
                    .downcase
 
       white = Text::WhiteSimilarity.new
-      similarity = white.similarity(clue['answer'], response)
+      similarity = white.similarity(clue['answer'], user_response)
 
       alt_similarity = 0
       unless clue['alternate'].nil?
-        alt_similarity = white.similarity(clue['alternate'], response)
+        alt_similarity = white.similarity(clue['alternate'], user_response)
       end
 
-      puts "[LOG] User answer: #{response} | Correct answer (#{similarity}): #{clue['answer']} | Alternate answer (#{alt_similarity}): #{clue['alternate']}"
+      puts "[LOG] User response: '#{user_response}' | Correct answer (#{similarity}): '#{clue['answer']}' | Alternate answer (#{alt_similarity}): '#{clue['alternate']}'"
 
       response = {}
-      response[:exact] = clue['answer'] == response || clue['alternate'] == response || similarity == 1.0 || alt_similarity == 1.0
+      response[:exact] = clue['answer'] == user_response || clue['alternate'] == user_response
       response[:close] = similarity >= ENV['SIMILARITY_THRESHOLD'].to_f || alt_similarity >= ENV['SIMILARITY_THRESHOLD'].to_f
       response[:correct] = response[:exact] || response[:close]
       response
+
     end
 
     def remaining_clue_count
@@ -326,7 +327,7 @@ module Jeoparty
         clue['alternate'] = answer_sanitized.gsub(/[^\/[[:alnum:]]\s\-]/i, '')
       end
 
-      clue['answer'] = answer_sanitized.gsub(/\(.*\)/, '').gsub(/[^\/[[:alnum:]]\s\-]/i, '')
+      clue['answer'] = answer_sanitized.gsub(/\(.*\)/, '').gsub(/[^\/[[:alnum:]]\s\-]/i, '').strip
 
       # Skip clues with empty questions or answers or if they've been voted as invalid
       if !clue['answer'].nil? && !clue['question'].nil? && !clue['question'].empty? && clue['invalid_count'].nil?

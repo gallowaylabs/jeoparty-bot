@@ -29,3 +29,7 @@ https://github.com/esbdotio/jeoparty-bot/wiki
 
 ## License
 MIT. See LICENSE for the full text. 
+
+## Disclaimer
+Jeoparty bot! is not affiliated with or endorsed by Jeopardy Productions, Inc., CBS Television Distribution, or any of
+their affiliates or subsidiaries. We declare no affiliation, sponsorship or any partnerships with any registered trademarks.

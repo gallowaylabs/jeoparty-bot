@@ -347,7 +347,7 @@ Source code available at: https://github.com/esbdotio/jeoparty-bot.
 
   EM.run do
     # Load .env vars
-    Dotenv.load
+    Dotenv.load!
     # Disable output buffering
     $stdout.sync = true
 
