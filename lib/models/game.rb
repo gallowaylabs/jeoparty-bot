@@ -195,7 +195,7 @@ module Jeoparty
               response[:correct] = false
               response[:bad_sport] = true
             end
-            value = get_bid(user, clue['id'])
+            value = 1000
             response[:show_answer] = clue['answer']
           else
             value = clue['value']
@@ -267,11 +267,24 @@ module Jeoparty
       @redis.hincrby("game_score:#{@id}", user, correct ? amount : amount * -1)
     end
 
-    def moderator_update_score(user, timestamp, reset = false)
+    def moderator_reset_score(user, timestamp)
       response_key = "response:#{@id}:#{user}:#{timestamp}"
       response = @redis.hgetall(response_key)
       unless response.nil? or response.empty?
-        value = reset ? response['value'].to_i : response['value'].to_i * 2
+        value = response['value'].to_i
+        # correct != true because we want correct answers to be subtracted from and incorrect to be added to
+        delta = response['correct'] == 'true' ? value * -1 : value
+        @redis.del(response_key) # Avoid double score modifications
+
+        update_score(user, delta, true)
+      end
+    end
+
+    def moderator_update_score(user, timestamp)
+      response_key = "response:#{@id}:#{user}:#{timestamp}"
+      response = @redis.hgetall(response_key)
+      unless response.nil? or response.empty?
+        value = response['value'].to_i * 2
         # correct != true because we want correct answers to be subtracted from and incorrect to be added to
         delta = response['correct'] == 'true' ? value * -1 : value
         @redis.del(response_key) # Avoid double score modifications
@@ -296,10 +309,10 @@ module Jeoparty
       end
     end
 
-    def category_vote(message_id, score)
+    def category_vote(message_id, increase)
       key = "game:#{@id}:vote:#{message_id}"
       if @redis.exists(key)
-        @redis.incrby(key, score)
+        @redis.incrby(key, increase ? 1 : -1)
       end
     end
 

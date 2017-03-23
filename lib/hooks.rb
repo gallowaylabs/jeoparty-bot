@@ -26,8 +26,17 @@ module Jeoparty
             end
           end
 
-          if %w(+1 -1).include?(emoji)
-            score = game.category_vote(data['item']['ts'], emoji.to_i) # Hilariously inadvisable
+          if emoji == 'neutral_face' && Channel.get(data['item']['channel']).is_user_moderator?(data['user'])
+            score = game.moderator_reset_score(data['item_user'], data['item']['ts'])
+            message = "<@#{data['item_user']}>, the judges have removed your response to an earlier clue. Your score is now #{Util.format_currency(score)}."
+            client.say(text: message, channel: data['item']['channel'])
+
+          end
+
+          positive_emoji = %w(+1 thumbsup up yes y thumbsup_all)
+          negative_emoji = %w(-1 thumbsdown no)
+          if positive_emoji.include?(emoji) || negative_emoji.include?(emoji)
+            score = game.category_vote(data['item']['ts'], positive_emoji.include?(emoji))
             if !score.nil? && score.to_i <= ENV['CATEGORY_SHUFFLE_MINIMUM'].to_i
               game.cleanup
               client.say(text: 'Category shuffle vote passed. You may try your luck at category selection again with `start game`',

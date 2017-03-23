@@ -125,7 +125,7 @@ module Jeoparty
       else
         # Only start a new game if the previous game is over
         if clue_count.nil? || clue_count == 0
-          game = Channel.get(data.channel).new_game(match[:mode])
+          game = Channel.get(data.channel).new_game(match[:mode].downcase)
 
           if game.categories.nil?
             text = %Q{<!here> *Starting a new game* 30 random clues have been chosen
@@ -347,7 +347,8 @@ Source code available at: https://github.com/esbdotio/jeoparty-bot.
 
   EM.run do
     # Load .env vars
-    Dotenv.load!
+    # noinspection RubyArgCount
+    Dotenv.load
     # Disable output buffering
     $stdout.sync = true
 
