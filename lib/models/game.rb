@@ -195,7 +195,7 @@ module Jeoparty
               response[:correct] = false
               response[:bad_sport] = true
             end
-            value = 1000
+            value = get_bid(user, clue['id'])
             response[:show_answer] = clue['answer']
           else
             value = clue['value']
